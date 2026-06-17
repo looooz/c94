@@ -5,12 +5,12 @@ echo "        PDF处理工具 - 一键启动脚本"
 echo "=========================================="
 echo ""
 
-PROJECT_ROOT=$(pwd)
+PROJECT_ROOT='/Users/macbook/dev/trae/lzp/solocoder/c94'
 BACKEND_DIR="$PROJECT_ROOT/backend"
 FRONTEND_DIR="$PROJECT_ROOT/frontend"
 
 echo "📦 检查并安装后端依赖..."
-cd "$BACKEND_DIR"
+cd $BACKEND_DIR
 if [ ! -d "node_modules" ]; then
     echo "   正在安装后端依赖..."
     npm install
@@ -24,7 +24,7 @@ fi
 
 echo ""
 echo "📦 检查并安装前端依赖..."
-cd "$FRONTEND_DIR"
+cd $FRONTEND_DIR
 if [ ! -d "node_modules" ]; then
     echo "   正在安装前端依赖..."
     npm install

@@ -91,46 +91,66 @@
         </div>
       </div>
 
-      <div v-if="result" class="result-card">
+      <div v-if="convertedImages.length > 0" class="result-card">
         <h3 style="margin-bottom: 16px; color: #667eea;">
           <el-icon style="margin-right: 8px;"><CircleCheckFilled /></el-icon>
           转换成功！
         </h3>
         <p style="margin-bottom: 12px;">
-          共转换 <strong>{{ result.fileCount }}</strong> 张图片
-        </p>
-        <p style="margin-bottom: 12px;">
-          格式：{{ outputFormat.toUpperCase() }}
+          共转换 <strong>{{ convertedImages.length }}</strong> 张图片
         </p>
         <p style="margin-bottom: 16px;">
-          压缩包大小：{{ formatFileSize(result.fileSize) }}
+          格式：{{ outputFormat.toUpperCase() }}
         </p>
-        <button class="action-button" @click="downloadResult">
-          <el-icon style="margin-right: 8px;"><Download /></el-icon>
-          下载ZIP压缩包
-        </button>
+        
+        <div class="preview-grid">
+          <div 
+            v-for="(img, index) in convertedImages" 
+            :key="index"
+            class="preview-item"
+          >
+            <div class="preview-label">第 {{ img.pageNum }} 页</div>
+            <img :src="img.dataUrl" :alt="'Page ' + img.pageNum" class="preview-image" />
+            <button 
+              class="download-single-btn"
+              @click="downloadSingleImage(img)"
+            >
+              <el-icon><Download /></el-icon>
+              下载
+            </button>
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 20px;">
+          <button class="action-button" @click="downloadAllImages">
+            <el-icon style="margin-right: 8px;"><Download /></el-icon>
+            下载全部 (ZIP)
+          </button>
+        </div>
       </div>
     </div>
 
-    <LoadingOverlay :visible="loading" text="正在转换PDF..." />
+    <LoadingOverlay :visible="loading" :text="loadingText" />
   </div>
 </template>
 
 <script setup>
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
-import { 
-  pdfToImage as pdfToImageApi, 
-  formatFileSize, 
-  downloadFile 
-} from '../utils/api'
+import * as pdfjsLib from 'pdfjs-dist'
+import JSZip from 'jszip'
+import { formatFileSize, downloadFile } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js'
 
 const fileInput = ref(null)
 const file = ref(null)
 const isDragging = ref(false)
 const loading = ref(false)
-const result = ref(null)
+const loadingText = ref('正在转换PDF...')
+const convertedImages = ref([])
+const pdfDoc = ref(null)
 
 const outputFormat = ref('png')
 const pageMode = ref('all')
@@ -141,69 +161,238 @@ const triggerFileInput = () => {
   fileInput.value.click()
 }
 
-const handleFileSelect = (e) => {
+const handleFileSelect = async (e) => {
   const selectedFile = e.target.files[0]
   if (selectedFile && selectedFile.type === 'application/pdf') {
     file.value = selectedFile
-    result.value = null
+    convertedImages.value = []
+    await loadPdf(selectedFile)
   }
   e.target.value = ''
 }
 
-const handleDrop = (e) => {
+const handleDrop = async (e) => {
   isDragging.value = false
   const droppedFile = e.dataTransfer.files[0]
   if (droppedFile && droppedFile.type === 'application/pdf') {
     file.value = droppedFile
-    result.value = null
+    convertedImages.value = []
+    await loadPdf(droppedFile)
   } else {
     ElMessage.warning('请拖入PDF文件')
   }
 }
 
-const removeFile = () => {
-  file.value = null
-  result.value = null
+const loadPdf = async (pdfFile) => {
+  try {
+    const arrayBuffer = await pdfFile.arrayBuffer()
+    pdfDoc.value = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+  } catch (error) {
+    ElMessage.error('无法加载PDF文件')
+    console.error('PDF load error:', error)
+  }
+}
+
+const parsePageRange = (rangeStr, totalPages) => {
+  const pages = []
+  const parts = rangeStr.split(',').map(p => p.trim())
+  
+  for (const part of parts) {
+    if (part.includes('-')) {
+      const [start, end] = part.split('-').map(p => parseInt(p.trim()))
+      if (!isNaN(start) && !isNaN(end) && start >= 1 && end <= totalPages) {
+        for (let i = start; i <= end; i++) {
+          pages.push(i)
+        }
+      }
+    } else {
+      const pageNum = parseInt(part)
+      if (!isNaN(pageNum) && pageNum >= 1 && pageNum <= totalPages) {
+        pages.push(pageNum)
+      }
+    }
+  }
+  
+  return [...new Set(pages)].sort((a, b) => a - b)
+}
+
+const renderPageToImage = async (pageNum) => {
+  if (!pdfDoc.value) return null
+  
+  const page = await pdfDoc.value.getPage(pageNum)
+  const viewport = page.getViewport({ scale: dpi.value / 72 })
+  
+  const canvas = document.createElement('canvas')
+  const context = canvas.getContext('2d')
+  canvas.width = viewport.width
+  canvas.height = viewport.height
+  
+  await page.render({
+    canvasContext: context,
+    viewport: viewport
+  }).promise
+  
+  const mimeType = outputFormat.value === 'jpg' ? 'image/jpeg' : 'image/png'
+  const quality = outputFormat.value === 'jpg' ? 0.92 : undefined
+  const dataUrl = canvas.toDataURL(mimeType, quality)
+  
+  const base64Data = dataUrl.split(',')[1]
+  const byteCharacters = atob(base64Data)
+  const byteNumbers = new Array(byteCharacters.length)
+  for (let i = 0; i < byteCharacters.length; i++) {
+    byteNumbers[i] = byteCharacters.charCodeAt(i)
+  }
+  const byteArray = new Uint8Array(byteNumbers)
+  
+  return {
+    pageNum,
+    dataUrl,
+    byteArray,
+    fileName: `page_${pageNum}.${outputFormat.value}`
+  }
 }
 
 const convertToImage = async () => {
-  if (!file.value) {
+  if (!file.value || !pdfDoc.value) {
     ElMessage.warning('请上传PDF文件')
     return
   }
 
-  const options = {
-    format: outputFormat.value,
-    pageMode: pageMode.value,
-    dpi: dpi.value
-  }
-
-  if (pageMode.value === 'specific' && !specificPages.value.trim()) {
-    ElMessage.warning('请输入指定页码')
-    return
-  }
-
-  if (pageMode.value === 'specific') {
-    options.specificPages = specificPages.value
+  const totalPages = pdfDoc.value.numPages
+  let pagesToConvert = []
+  
+  if (pageMode.value === 'all') {
+    pagesToConvert = Array.from({ length: totalPages }, (_, i) => i + 1)
+  } else if (pageMode.value === 'specific') {
+    if (!specificPages.value.trim()) {
+      ElMessage.warning('请输入指定页码')
+      return
+    }
+    pagesToConvert = parsePageRange(specificPages.value, totalPages)
+    if (pagesToConvert.length === 0) {
+      ElMessage.warning('没有有效的页码')
+      return
+    }
   }
 
   loading.value = true
-  result.value = null
+  convertedImages.value = []
 
   try {
-    const response = await pdfToImageApi(file.value, options)
-    result.value = response.data
+    for (let i = 0; i < pagesToConvert.length; i++) {
+      const pageNum = pagesToConvert[i]
+      loadingText.value = `正在转换第 ${pageNum} 页 (${i + 1}/${pagesToConvert.length})...`
+      
+      const imageData = await renderPageToImage(pageNum)
+      if (imageData) {
+        convertedImages.value.push(imageData)
+      }
+    }
+    
     ElMessage.success('PDF转图片成功！')
   } catch (error) {
-    ElMessage.error(error.response?.data?.error || '转换失败，请重试')
+    ElMessage.error('转换失败，请重试')
+    console.error('Convert error:', error)
   } finally {
     loading.value = false
+    loadingText.value = '正在转换PDF...'
   }
 }
 
-const downloadResult = () => {
-  if (result.value) {
-    downloadFile(result.value.downloadUrl, `pdf_to_images_${Date.now()}.zip`)
+const downloadSingleImage = (imageData) => {
+  const link = document.createElement('a')
+  link.href = imageData.dataUrl
+  link.download = imageData.fileName
+  link.click()
+}
+
+const downloadAllImages = async () => {
+  if (convertedImages.value.length === 0) return
+  
+  loading.value = true
+  loadingText.value = '正在打包ZIP...'
+  
+  try {
+    const zip = new JSZip()
+    
+    for (const img of convertedImages.value) {
+      zip.file(img.fileName, img.byteArray)
+    }
+    
+    const zipContent = await zip.generateAsync({ type: 'blob' })
+    const url = URL.createObjectURL(zipContent)
+    downloadFile(url, `pdf_to_images_${Date.now()}.zip`)
+    URL.revokeObjectURL(url)
+    
+    ElMessage.success('下载成功！')
+  } catch (error) {
+    ElMessage.error('打包失败，请重试')
+    console.error('Zip error:', error)
+  } finally {
+    loading.value = false
+    loadingText.value = '正在转换PDF...'
   }
 }
+
+const removeFile = () => {
+  file.value = null
+  pdfDoc.value = null
+  convertedImages.value = []
+}
 </script>
+
+<style scoped>
+.preview-grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(200px, 1fr));
+  gap: 16px;
+  margin-top: 20px;
+}
+
+.preview-item {
+  border: 1px solid #e5e7eb;
+  border-radius: 8px;
+  padding: 12px;
+  background: #f9fafb;
+  text-align: center;
+}
+
+.preview-label {
+  font-size: 13px;
+  color: #666;
+  margin-bottom: 8px;
+  font-weight: 500;
+}
+
+.preview-image {
+  max-width: 100%;
+  max-height: 200px;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  margin-bottom: 8px;
+  box-shadow: 0 2px 4px rgba(0,0,0,0.1);
+}
+
+.download-single-btn {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 6px 12px;
+  font-size: 12px;
+  background: #667eea;
+  color: white;
+  border: none;
+  border-radius: 4px;
+  cursor: pointer;
+  transition: background 0.2s;
+}
+
+.download-single-btn:hover {
+  background: #5a6fd6;
+}
+
+.page-range-input {
+  width: 300px;
+  margin-right: 12px;
+}
+</style>

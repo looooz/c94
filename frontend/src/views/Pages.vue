@@ -147,6 +147,31 @@
         </template>
       </div>
 
+      <div v-if="file && !result" class="preview-section">
+        <h3 style="margin-bottom: 16px; color: #333;">
+          <el-icon style="margin-right: 8px;"><View /></el-icon>
+          原始PDF预览
+        </h3>
+        <div class="pdf-preview-container">
+          <canvas ref="beforePreviewCanvas" class="preview-canvas"></canvas>
+        </div>
+        <div v-if="totalPages > 1" class="page-navigation">
+          <el-button 
+            :disabled="currentPage === 1" 
+            @click="currentPage--; renderPreviewPage('before', currentPage)"
+          >
+            <el-icon><ArrowLeft /></el-icon> 上一页
+          </el-button>
+          <span style="margin: 0 16px;">第 {{ currentPage }} / {{ totalPages }} 页</span>
+          <el-button 
+            :disabled="currentPage === totalPages" 
+            @click="currentPage++; renderPreviewPage('before', currentPage)"
+          >
+            下一页 <el-icon><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+      </div>
+
       <div v-if="result" class="result-card">
         <h3 style="margin-bottom: 16px; color: #667eea;">
           <el-icon style="margin-right: 8px;"><CircleCheckFilled /></el-icon>
@@ -164,10 +189,44 @@
         <p style="margin-bottom: 16px;">
           文件大小：{{ formatFileSize(result.fileSize) }}
         </p>
-        <button class="action-button" @click="downloadResult">
-          <el-icon style="margin-right: 8px;"><Download /></el-icon>
-          下载PDF
-        </button>
+
+        <div class="preview-comparison">
+          <div class="preview-column">
+            <h4 style="margin-bottom: 12px; color: #999;">处理前</h4>
+            <div class="pdf-preview-container">
+              <canvas ref="beforeCompareCanvas" class="preview-canvas"></canvas>
+            </div>
+          </div>
+          <div class="preview-column">
+            <h4 style="margin-bottom: 12px; color: #667eea;">处理后</h4>
+            <div class="pdf-preview-container">
+              <canvas ref="afterPreviewCanvas" class="preview-canvas"></canvas>
+            </div>
+          </div>
+        </div>
+        
+        <div v-if="totalPages > 1" class="page-navigation">
+          <el-button 
+            :disabled="comparePage === 1" 
+            @click="comparePage--; renderComparePages(comparePage)"
+          >
+            <el-icon><ArrowLeft /></el-icon> 上一页
+          </el-button>
+          <span style="margin: 0 16px;">第 {{ comparePage }} / {{ afterTotalPages > 0 ? afterTotalPages : totalPages }} 页</span>
+          <el-button 
+            :disabled="comparePage >= (afterTotalPages > 0 ? afterTotalPages : totalPages)" 
+            @click="comparePage++; renderComparePages(comparePage)"
+          >
+            下一页 <el-icon><ArrowRight /></el-icon>
+          </el-button>
+        </div>
+
+        <div style="text-align: center; margin-top: 24px;">
+          <button class="action-button" @click="downloadResult">
+            <el-icon style="margin-right: 8px;"><Download /></el-icon>
+            下载PDF
+          </button>
+        </div>
       </div>
     </div>
 
@@ -176,7 +235,7 @@
 </template>
 
 <script setup>
-import { ref, computed } from 'vue'
+import { ref, computed, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import { 
   deletePages,
@@ -187,6 +246,9 @@ import {
   downloadFile 
 } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
+import * as pdfjsLib from 'pdfjs-dist'
+
+pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js'
 
 const fileInput = ref(null)
 const file = ref(null)
@@ -201,6 +263,16 @@ const pagesToRotate = ref('')
 const rotation = ref(90)
 const pagesToExtract = ref('')
 const newOrder = ref('')
+
+const beforePreviewCanvas = ref(null)
+const beforeCompareCanvas = ref(null)
+const afterPreviewCanvas = ref(null)
+const pdfDoc = ref(null)
+const afterPdfDoc = ref(null)
+const totalPages = ref(0)
+const afterTotalPages = ref(0)
+const currentPage = ref(1)
+const comparePage = ref(1)
 
 const loadingText = computed(() => {
   switch (activeTab.value) {
@@ -226,29 +298,98 @@ const triggerFileInput = () => {
   fileInput.value.click()
 }
 
-const handleFileSelect = (e) => {
+const handleFileSelect = async (e) => {
   const selectedFile = e.target.files[0]
   if (selectedFile && selectedFile.type === 'application/pdf') {
     file.value = selectedFile
     result.value = null
+    await loadPdfForPreview(selectedFile)
   }
   e.target.value = ''
 }
 
-const handleDrop = (e) => {
+const handleDrop = async (e) => {
   isDragging.value = false
   const droppedFile = e.dataTransfer.files[0]
   if (droppedFile && droppedFile.type === 'application/pdf') {
     file.value = droppedFile
     result.value = null
+    await loadPdfForPreview(droppedFile)
   } else {
     ElMessage.warning('请拖入PDF文件')
   }
 }
 
+const loadPdfForPreview = async (pdfFile) => {
+  try {
+    const arrayBuffer = await pdfFile.arrayBuffer()
+    pdfDoc.value = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+    totalPages.value = pdfDoc.value.numPages
+    currentPage.value = 1
+    await nextTick()
+    await renderPreviewPage('before', 1)
+  } catch (error) {
+    console.error('Failed to load PDF for preview:', error)
+  }
+}
+
+const loadAfterPdfForPreview = async (downloadUrl) => {
+  try {
+    const response = await fetch(downloadUrl)
+    const arrayBuffer = await response.arrayBuffer()
+    afterPdfDoc.value = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+    afterTotalPages.value = afterPdfDoc.value.numPages
+    comparePage.value = 1
+    await nextTick()
+    await renderComparePages(1)
+  } catch (error) {
+    console.error('Failed to load processed PDF for preview:', error)
+  }
+}
+
+const renderPreviewPage = async (type, pageNum) => {
+  const canvas = type === 'before' ? beforePreviewCanvas.value : beforeCompareCanvas.value
+  if (!canvas || !pdfDoc.value) return
+  
+  const page = await pdfDoc.value.getPage(pageNum)
+  const viewport = page.getViewport({ scale: 1.5 })
+  const context = canvas.getContext('2d')
+  canvas.width = viewport.width
+  canvas.height = viewport.height
+  
+  await page.render({
+    canvasContext: context,
+    viewport: viewport
+  }).promise
+}
+
+const renderComparePages = async (pageNum) => {
+  await renderPreviewPage('before-compare', pageNum)
+  
+  const canvas = afterPreviewCanvas.value
+  if (!canvas || !afterPdfDoc.value) return
+  
+  if (pageNum < 1 || pageNum > afterPdfDoc.value.numPages) return
+  
+  const page = await afterPdfDoc.value.getPage(pageNum)
+  const viewport = page.getViewport({ scale: 1.5 })
+  const context = canvas.getContext('2d')
+  canvas.width = viewport.width
+  canvas.height = viewport.height
+  
+  await page.render({
+    canvasContext: context,
+    viewport: viewport
+  }).promise
+}
+
 const removeFile = () => {
   file.value = null
   result.value = null
+  pdfDoc.value = null
+  afterPdfDoc.value = null
+  totalPages.value = 0
+  afterTotalPages.value = 0
 }
 
 const handleDeletePages = async () => {
@@ -264,6 +405,7 @@ const handleDeletePages = async () => {
     const response = await deletePages(file.value, pagesToDelete.value)
     result.value = response.data
     ElMessage.success('页面删除成功！')
+    await loadAfterPdfForPreview(response.data.downloadUrl)
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '删除失败，请重试')
   } finally {
@@ -285,6 +427,7 @@ const handleRotatePages = async () => {
     const response = await rotatePages(file.value, pages, rotation.value)
     result.value = response.data
     ElMessage.success('页面旋转成功！')
+    await loadAfterPdfForPreview(response.data.downloadUrl)
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '旋转失败，请重试')
   } finally {
@@ -305,6 +448,7 @@ const handleExtractPages = async () => {
     const response = await extractPages(file.value, pagesToExtract.value)
     result.value = response.data
     ElMessage.success('页面提取成功！')
+    await loadAfterPdfForPreview(response.data.downloadUrl)
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '提取失败，请重试')
   } finally {
@@ -326,6 +470,7 @@ const handleReorderPages = async () => {
     const response = await reorderPages(file.value, orderArr)
     result.value = response.data
     ElMessage.success('页面重排序成功！')
+    await loadAfterPdfForPreview(response.data.downloadUrl)
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '重排序失败，请重试')
   } finally {
@@ -339,3 +484,58 @@ const downloadResult = () => {
   }
 }
 </script>
+
+<style scoped>
+.preview-section {
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid #eee;
+}
+
+.pdf-preview-container {
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 500px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px;
+}
+
+.preview-canvas {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: white;
+  max-width: 100%;
+}
+
+.page-navigation {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 16px;
+}
+
+.preview-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin: 24px 0;
+}
+
+.preview-column {
+  text-align: center;
+}
+
+.preview-column h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .preview-comparison {
+    grid-template-columns: 1fr;
+  }
+}
+</style>
