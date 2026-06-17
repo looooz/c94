@@ -152,13 +152,16 @@
 import { ref } from 'vue'
 import { ElMessage } from 'element-plus'
 import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import cMapUrl from 'pdfjs-dist/cmaps/UniGB-UTF8-H.bcmap?url'
 import JSZip from 'jszip'
 import { formatFileSize, downloadFile } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
 import PdfPreview from '../components/PdfPreview.vue'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js'
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
+const cMapBaseUrl = cMapUrl.substring(0, cMapUrl.lastIndexOf('/') + 1)
 
 const fileInput = ref(null)
 const file = ref(null)
@@ -205,7 +208,11 @@ const handleDrop = async (e) => {
 const loadPdf = async (pdfFile) => {
   try {
     const arrayBuffer = await pdfFile.arrayBuffer()
-    pdfDoc.value = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+    pdfDoc.value = await pdfjsLib.getDocument({
+      data: arrayBuffer,
+      cMapUrl: cMapBaseUrl,
+      cMapPacked: true
+    }).promise
   } catch (error) {
     ElMessage.error('无法加载PDF文件')
     console.error('PDF load error:', error)

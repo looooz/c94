@@ -278,8 +278,11 @@ import LoadingOverlay from '../components/LoadingOverlay.vue'
 import PdfPreview from '../components/PdfPreview.vue'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import cMapUrl from 'pdfjs-dist/cmaps/UniGB-UTF8-H.bcmap?url'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js'
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
+const cMapBaseUrl = cMapUrl.substring(0, cMapUrl.lastIndexOf('/') + 1)
 
 const fileInput = ref(null)
 const file = ref(null)
@@ -430,7 +433,11 @@ const handleDrop = async (e) => {
 const loadPdfForPreview = async (pdfFile) => {
   try {
     const arrayBuffer = await pdfFile.arrayBuffer()
-    pdfDoc.value = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+    pdfDoc.value = await pdfjsLib.getDocument({
+      data: arrayBuffer,
+      cMapUrl: cMapBaseUrl,
+      cMapPacked: true
+    }).promise
     totalPages.value = pdfDoc.value.numPages
     currentPage.value = 1
     await nextTick()
@@ -444,7 +451,11 @@ const loadAfterPdfForPreview = async (downloadUrl) => {
   try {
     const response = await fetch(downloadUrl)
     const arrayBuffer = await response.arrayBuffer()
-    afterPdfDoc.value = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+    afterPdfDoc.value = await pdfjsLib.getDocument({
+      data: arrayBuffer,
+      cMapUrl: cMapBaseUrl,
+      cMapPacked: true
+    }).promise
     comparePage.value = 1
     await nextTick()
     await renderComparePages(1)

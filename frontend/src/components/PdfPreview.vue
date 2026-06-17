@@ -5,18 +5,18 @@
     :style="{ width: width, height: height }"
     @click="handleClick"
   >
+    <canvas 
+      ref="previewCanvas" 
+      class="preview-canvas"
+      :style="{ display: error ? 'none' : 'block' }"
+    />
     <div v-if="loading" class="preview-loading">
       <el-icon class="is-loading"><Loading /></el-icon>
     </div>
-    <div v-else-if="error" class="preview-error">
+    <div v-if="error" class="preview-error">
       <el-icon><Warning /></el-icon>
       <span>无法预览</span>
     </div>
-    <canvas 
-      v-else 
-      ref="previewCanvas" 
-      class="preview-canvas"
-    />
     <div v-if="showPageInfo && totalPages > 0" class="page-info">
       {{ totalPages }} 页
     </div>
@@ -29,8 +29,11 @@
 <script setup>
 import { ref, watch, onMounted, onBeforeUnmount, nextTick } from 'vue'
 import * as pdfjsLib from 'pdfjs-dist'
+import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
+import cMapUrl from 'pdfjs-dist/cmaps/UniGB-UTF8-H.bcmap?url'
 
-pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js'
+pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
+const cMapBaseUrl = cMapUrl.substring(0, cMapUrl.lastIndexOf('/') + 1)
 
 const props = defineProps({
   src: {
@@ -68,6 +71,7 @@ const totalPages = ref(0)
 let pdfDoc = null
 
 const loadPdf = async () => {
+
   if (!props.src) {
     error.value = true
     return
@@ -90,7 +94,11 @@ const loadPdf = async () => {
       throw new Error('Invalid source')
     }
 
-    pdfDoc = await pdfjsLib.getDocument({ data: arrayBuffer }).promise
+    pdfDoc = await pdfjsLib.getDocument({
+      data: arrayBuffer,
+      cMapUrl: cMapBaseUrl,
+      cMapPacked: true
+    }).promise
     totalPages.value = pdfDoc.numPages
 
     await nextTick()
@@ -104,19 +112,28 @@ const loadPdf = async () => {
 }
 
 const renderPage = async (pageNum) => {
-  if (!previewCanvas.value || !pdfDoc) return
 
-  const page = await pdfDoc.getPage(pageNum)
-  const viewport = page.getViewport({ scale: props.scale })
-  const context = previewCanvas.value.getContext('2d')
-  
-  previewCanvas.value.width = viewport.width
-  previewCanvas.value.height = viewport.height
-  
-  await page.render({
-    canvasContext: context,
-    viewport: viewport
-  }).promise
+  if (!previewCanvas.value || !pdfDoc) {
+    return
+  }
+
+  try {
+    const page = await pdfDoc.getPage(pageNum)
+    const viewport = page.getViewport({ scale: props.scale })
+    const context = previewCanvas.value.getContext('2d')
+    
+    previewCanvas.value.width = viewport.width
+    previewCanvas.value.height = viewport.height
+    
+    await page.render({
+      canvasContext: context,
+      viewport: viewport
+    }).promise
+  } catch (err) {
+    if (err?.name !== 'RenderingCancelledException') {
+      throw err
+    }
+  }
 }
 
 const handleClick = () => {
