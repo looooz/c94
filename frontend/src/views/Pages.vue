@@ -47,12 +47,20 @@
       </div>
 
       <div v-if="file" class="file-item" style="margin-bottom: 24px;">
-        <div style="display: flex; align-items: center;">
-          <el-icon color="#667eea"><Document /></el-icon>
-          <span style="margin-left: 12px;">{{ file.name }}</span>
-          <span style="margin-left: 12px; color: #999; font-size: 13px;">
-            {{ formatFileSize(file.size) }}
-          </span>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <PdfPreview 
+            :src="file" 
+            width="80px" 
+            height="100px" 
+            :scale="1"
+            @click="openPreviewModal(file, file.name)"
+          />
+          <div>
+            <span style="font-weight: 500; color: #333;">{{ file.name }}</span>
+            <div style="color: #999; font-size: 13px; margin-top: 4px;">
+              {{ formatFileSize(file.size) }}
+            </div>
+          </div>
         </div>
         <el-button type="danger" text @click="removeFile">
           <el-icon><Delete /></el-icon>
@@ -231,6 +239,12 @@
     </div>
 
     <LoadingOverlay :visible="loading" :text="loadingText" />
+    
+    <PdfPreviewModal 
+      v-model="previewModalVisible" 
+      :src="previewModalSrc" 
+      :title="previewModalTitle"
+    />
   </div>
 </template>
 
@@ -246,6 +260,8 @@ import {
   downloadFile 
 } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
+import PdfPreview from '../components/PdfPreview.vue'
+import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 import * as pdfjsLib from 'pdfjs-dist'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js'
@@ -273,6 +289,10 @@ const totalPages = ref(0)
 const afterTotalPages = ref(0)
 const currentPage = ref(1)
 const comparePage = ref(1)
+
+const previewModalVisible = ref(false)
+const previewModalSrc = ref(null)
+const previewModalTitle = ref('PDF预览')
 
 const loadingText = computed(() => {
   switch (activeTab.value) {
@@ -482,6 +502,12 @@ const downloadResult = () => {
   if (result.value) {
     downloadFile(result.value.downloadUrl, `pages_${activeTab.value}_${Date.now()}.pdf`)
   }
+}
+
+const openPreviewModal = (src, title) => {
+  previewModalSrc.value = src
+  previewModalTitle.value = title || 'PDF预览'
+  previewModalVisible.value = true
 }
 </script>
 

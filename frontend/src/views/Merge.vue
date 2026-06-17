@@ -43,15 +43,23 @@
           class="file-item"
           :data-id="index"
         >
-          <div style="display: flex; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 12px;">
             <span class="drag-handle">
               <el-icon><Rank /></el-icon>
             </span>
-            <el-icon color="#667eea"><Document /></el-icon>
-            <span style="margin-left: 12px;">{{ file.name }}</span>
-            <span style="margin-left: 12px; color: #999; font-size: 13px;">
-              {{ formatFileSize(file.size) }}
-            </span>
+            <PdfPreview 
+              :src="file" 
+              width="80px" 
+              height="100px" 
+              :scale="1"
+              @click="openPreviewModal(file, file.name)"
+            />
+            <div>
+              <span style="font-weight: 500; color: #333;">{{ file.name }}</span>
+              <div style="color: #999; font-size: 13px; margin-top: 4px;">
+                {{ formatFileSize(file.size) }}
+              </div>
+            </div>
           </div>
           <el-button type="danger" text @click="removeFile(index)">
             <el-icon><Delete /></el-icon>
@@ -77,14 +85,39 @@
         <p style="margin-bottom: 16px;">
           文件大小：{{ formatFileSize(result.fileSize) }}
         </p>
-        <button class="action-button" @click="downloadResult">
-          <el-icon style="margin-right: 8px;"><Download /></el-icon>
-          下载合并后的PDF
-        </button>
+
+        <div class="result-preview-section">
+          <h4 style="margin-bottom: 12px; color: #333;">
+            <el-icon style="margin-right: 8px;"><View /></el-icon>
+            合并结果预览
+          </h4>
+          <div class="result-preview-wrapper">
+            <PdfPreview 
+              :src="result.downloadUrl" 
+              width="150px" 
+              height="200px" 
+              :scale="1.2"
+              @click="openPreviewModal(result.downloadUrl, result.fileName)"
+            />
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 24px;">
+          <button class="action-button" @click="downloadResult">
+            <el-icon style="margin-right: 8px;"><Download /></el-icon>
+            下载合并后的PDF
+          </button>
+        </div>
       </div>
     </div>
 
     <LoadingOverlay :visible="loading" text="正在合并PDF..." />
+    
+    <PdfPreviewModal 
+      v-model="previewModalVisible" 
+      :src="previewModalSrc" 
+      :title="previewModalTitle"
+    />
   </div>
 </template>
 
@@ -99,6 +132,8 @@ import {
   downloadFile 
 } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
+import PdfPreview from '../components/PdfPreview.vue'
+import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 
 const router = useRouter()
 const fileInput = ref(null)
@@ -107,6 +142,9 @@ const files = ref([])
 const isDragging = ref(false)
 const loading = ref(false)
 const result = ref(null)
+const previewModalVisible = ref(false)
+const previewModalSrc = ref(null)
+const previewModalTitle = ref('PDF预览')
 
 let sortableInstance = null
 
@@ -195,7 +233,26 @@ const downloadResult = () => {
   }
 }
 
+const openPreviewModal = (src, title) => {
+  previewModalSrc.value = src
+  previewModalTitle.value = title || 'PDF预览'
+  previewModalVisible.value = true
+}
+
 onMounted(() => {
   initSortable()
 })
 </script>
+
+<style scoped>
+.result-preview-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.result-preview-wrapper {
+  display: flex;
+  justify-content: center;
+}
+</style>

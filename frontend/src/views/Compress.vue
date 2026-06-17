@@ -34,12 +34,20 @@
       </div>
 
       <div v-if="file" class="file-item" style="margin-bottom: 24px;">
-        <div style="display: flex; align-items: center;">
-          <el-icon color="#667eea"><Document /></el-icon>
-          <span style="margin-left: 12px;">{{ file.name }}</span>
-          <span style="margin-left: 12px; color: #999; font-size: 13px;">
-            {{ formatFileSize(file.size) }}
-          </span>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <PdfPreview 
+            :src="file" 
+            width="80px" 
+            height="100px" 
+            :scale="1"
+            @click="openPreviewModal(file, file.name)"
+          />
+          <div>
+            <span style="font-weight: 500; color: #333;">{{ file.name }}</span>
+            <div style="color: #999; font-size: 13px; margin-top: 4px;">
+              {{ formatFileSize(file.size) }}
+            </div>
+          </div>
         </div>
         <el-button type="danger" text @click="removeFile">
           <el-icon><Delete /></el-icon>
@@ -87,6 +95,29 @@
           <div class="ratio-value">{{ result.compressionRatio }}%</div>
         </div>
 
+        <div class="preview-comparison">
+          <div class="preview-column">
+            <h4 style="margin-bottom: 12px; color: #999;">压缩前</h4>
+            <PdfPreview 
+              :src="file" 
+              width="120px" 
+              height="160px" 
+              :scale="1"
+              @click="openPreviewModal(file, '原始PDF')"
+            />
+          </div>
+          <div class="preview-column">
+            <h4 style="margin-bottom: 12px; color: #667eea;">压缩后</h4>
+            <PdfPreview 
+              :src="result.downloadUrl" 
+              width="120px" 
+              height="160px" 
+              :scale="1"
+              @click="openPreviewModal(result.downloadUrl, '压缩后PDF')"
+            />
+          </div>
+        </div>
+
         <div style="text-align: center; margin-top: 24px;">
           <button class="action-button" @click="downloadResult">
             <el-icon style="margin-right: 8px;"><Download /></el-icon>
@@ -97,6 +128,12 @@
     </div>
 
     <LoadingOverlay :visible="loading" text="正在压缩PDF..." />
+    
+    <PdfPreviewModal 
+      v-model="previewModalVisible" 
+      :src="previewModalSrc" 
+      :title="previewModalTitle"
+    />
   </div>
 </template>
 
@@ -109,6 +146,8 @@ import {
   downloadFile 
 } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
+import PdfPreview from '../components/PdfPreview.vue'
+import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 
 const fileInput = ref(null)
 const file = ref(null)
@@ -116,6 +155,9 @@ const isDragging = ref(false)
 const loading = ref(false)
 const result = ref(null)
 const compressLevel = ref('medium')
+const previewModalVisible = ref(false)
+const previewModalSrc = ref(null)
+const previewModalTitle = ref('PDF预览')
 
 const triggerFileInput = () => {
   fileInput.value.click()
@@ -171,4 +213,36 @@ const downloadResult = () => {
     downloadFile(result.value.downloadUrl, `compressed_${Date.now()}.pdf`)
   }
 }
+
+const openPreviewModal = (src, title) => {
+  previewModalSrc.value = src
+  previewModalTitle.value = title || 'PDF预览'
+  previewModalVisible.value = true
+}
 </script>
+
+<style scoped>
+.preview-comparison {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 24px;
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.preview-column {
+  text-align: center;
+}
+
+.preview-column h4 {
+  font-size: 14px;
+  font-weight: 600;
+}
+
+@media (max-width: 768px) {
+  .preview-comparison {
+    grid-template-columns: 1fr;
+  }
+}
+</style>

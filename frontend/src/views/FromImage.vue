@@ -41,16 +41,28 @@
           v-for="(file, index) in files" 
           :key="index" 
           class="file-item"
+          :data-id="index"
         >
-          <div style="display: flex; align-items: center;">
+          <div style="display: flex; align-items: center; gap: 12px;">
             <span class="drag-handle">
               <el-icon><Rank /></el-icon>
             </span>
-            <el-icon color="#fa709a"><Picture /></el-icon>
-            <span style="margin-left: 12px;">{{ file.name }}</span>
-            <span style="margin-left: 12px; color: #999; font-size: 13px;">
-              {{ formatFileSize(file.size) }}
-            </span>
+            <div 
+              class="image-preview-thumb"
+              @click="openImagePreview(file, file.name)"
+            >
+              <img 
+                :src="getImagePreviewUrl(file)" 
+                :alt="file.name"
+                class="thumb-image"
+              />
+            </div>
+            <div>
+              <span style="font-weight: 500; color: #333;">{{ file.name }}</span>
+              <div style="color: #999; font-size: 13px; margin-top: 4px;">
+                {{ formatFileSize(file.size) }}
+              </div>
+            </div>
           </div>
           <el-button type="danger" text @click="removeFile(index)">
             <el-icon><Delete /></el-icon>
@@ -111,14 +123,54 @@
         <p style="margin-bottom: 16px;">
           文件大小：{{ formatFileSize(result.fileSize) }}
         </p>
-        <button class="action-button" @click="downloadResult">
-          <el-icon style="margin-right: 8px;"><Download /></el-icon>
-          下载PDF
-        </button>
+
+        <div class="result-preview-section">
+          <h4 style="margin-bottom: 12px; color: #333;">
+            <el-icon style="margin-right: 8px;"><View /></el-icon>
+            转换结果预览
+          </h4>
+          <div class="result-preview-wrapper">
+            <PdfPreview 
+              :src="result.downloadUrl" 
+              width="150px" 
+              height="200px" 
+              :scale="1.2"
+              @click="openPreviewModal(result.downloadUrl, result.fileName)"
+            />
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 24px;">
+          <button class="action-button" @click="downloadResult">
+            <el-icon style="margin-right: 8px;"><Download /></el-icon>
+            下载PDF
+          </button>
+        </div>
       </div>
     </div>
 
     <LoadingOverlay :visible="loading" text="正在转换为PDF..." />
+    
+    <PdfPreviewModal 
+      v-model="previewModalVisible" 
+      :src="previewModalSrc" 
+      :title="previewModalTitle"
+    />
+
+    <el-dialog
+      v-model="imagePreviewVisible"
+      :title="imagePreviewTitle"
+      width="800px"
+      class="image-preview-modal"
+    >
+      <div class="image-preview-container">
+        <img 
+          :src="imagePreviewSrc" 
+          :alt="imagePreviewTitle"
+          class="preview-image"
+        />
+      </div>
+    </el-dialog>
   </div>
 </template>
 
@@ -132,6 +184,8 @@ import {
   downloadFile 
 } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
+import PdfPreview from '../components/PdfPreview.vue'
+import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 
 const fileInput = ref(null)
 const fileListRef = ref(null)
@@ -145,6 +199,16 @@ const customWidth = ref(800)
 const customHeight = ref(600)
 const margin = ref(20)
 const fit = ref('contain')
+
+const previewModalVisible = ref(false)
+const previewModalSrc = ref(null)
+const previewModalTitle = ref('PDF预览')
+
+const imagePreviewVisible = ref(false)
+const imagePreviewSrc = ref(null)
+const imagePreviewTitle = ref('图片预览')
+
+const imagePreviewUrls = ref({})
 
 let sortableInstance = null
 
@@ -170,6 +234,14 @@ const handleDrop = (e) => {
     return
   }
   addFiles(droppedFiles)
+}
+
+const getImagePreviewUrl = (file) => {
+  const key = file.name + '_' + file.size
+  if (!imagePreviewUrls.value[key]) {
+    imagePreviewUrls.value[key] = URL.createObjectURL(file)
+  }
+  return imagePreviewUrls.value[key]
 }
 
 const addFiles = (newFiles) => {
@@ -248,7 +320,76 @@ const downloadResult = () => {
   }
 }
 
+const openPreviewModal = (src, title) => {
+  previewModalSrc.value = src
+  previewModalTitle.value = title || 'PDF预览'
+  previewModalVisible.value = true
+}
+
+const openImagePreview = (file, title) => {
+  imagePreviewSrc.value = getImagePreviewUrl(file)
+  imagePreviewTitle.value = title || '图片预览'
+  imagePreviewVisible.value = true
+}
+
 onMounted(() => {
   initSortable()
 })
 </script>
+
+<style scoped>
+.image-preview-thumb {
+  width: 80px;
+  height: 80px;
+  border-radius: 8px;
+  overflow: hidden;
+  border: 1px solid #ddd;
+  cursor: pointer;
+  background: #f5f5f5;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  transition: all 0.2s;
+}
+
+.image-preview-thumb:hover {
+  border-color: #667eea;
+  box-shadow: 0 4px 12px rgba(102, 126, 234, 0.3);
+}
+
+.thumb-image {
+  max-width: 100%;
+  max-height: 100%;
+  object-fit: cover;
+}
+
+.result-preview-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.result-preview-wrapper {
+  display: flex;
+  justify-content: center;
+}
+
+.image-preview-modal :deep(.el-dialog__body) {
+  padding: 20px;
+}
+
+.image-preview-container {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  max-height: 70vh;
+  overflow: auto;
+}
+
+.preview-image {
+  max-width: 100%;
+  max-height: 70vh;
+  border-radius: 8px;
+  box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+</style>

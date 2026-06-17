@@ -34,12 +34,20 @@
       </div>
 
       <div v-if="file" class="file-item" style="margin-bottom: 24px;">
-        <div style="display: flex; align-items: center;">
-          <el-icon color="#667eea"><Document /></el-icon>
-          <span style="margin-left: 12px;">{{ file.name }}</span>
-          <span style="margin-left: 12px; color: #999; font-size: 13px;">
-            {{ formatFileSize(file.size) }}
-          </span>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <PdfPreview 
+            :src="file" 
+            width="80px" 
+            height="100px" 
+            :scale="1"
+            @click="openPreviewModal(file, file.name)"
+          />
+          <div>
+            <span style="font-weight: 500; color: #333;">{{ file.name }}</span>
+            <div style="color: #999; font-size: 13px; margin-top: 4px;">
+              {{ formatFileSize(file.size) }}
+            </div>
+          </div>
         </div>
         <el-button type="danger" text @click="removeFile">
           <el-icon><Delete /></el-icon>
@@ -131,6 +139,12 @@
     </div>
 
     <LoadingOverlay :visible="loading" :text="loadingText" />
+    
+    <PdfPreviewModal 
+      v-model="previewModalVisible" 
+      :src="previewModalSrc" 
+      :title="previewModalTitle"
+    />
   </div>
 </template>
 
@@ -141,6 +155,8 @@ import * as pdfjsLib from 'pdfjs-dist'
 import JSZip from 'jszip'
 import { formatFileSize, downloadFile } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
+import PdfPreview from '../components/PdfPreview.vue'
+import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 
 pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/4.0.379/pdf.worker.min.js'
 
@@ -151,6 +167,9 @@ const loading = ref(false)
 const loadingText = ref('正在转换PDF...')
 const convertedImages = ref([])
 const pdfDoc = ref(null)
+const previewModalVisible = ref(false)
+const previewModalSrc = ref(null)
+const previewModalTitle = ref('PDF预览')
 
 const outputFormat = ref('png')
 const pageMode = ref('all')
@@ -332,6 +351,12 @@ const downloadAllImages = async () => {
     loading.value = false
     loadingText.value = '正在转换PDF...'
   }
+}
+
+const openPreviewModal = (src, title) => {
+  previewModalSrc.value = src
+  previewModalTitle.value = title || 'PDF预览'
+  previewModalVisible.value = true
 }
 
 const removeFile = () => {

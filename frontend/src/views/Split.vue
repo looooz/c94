@@ -34,12 +34,20 @@
       </div>
 
       <div v-if="file" class="file-item" style="margin-bottom: 24px;">
-        <div style="display: flex; align-items: center;">
-          <el-icon color="#667eea"><Document /></el-icon>
-          <span style="margin-left: 12px;">{{ file.name }}</span>
-          <span style="margin-left: 12px; color: #999; font-size: 13px;">
-            {{ formatFileSize(file.size) }}
-          </span>
+        <div style="display: flex; align-items: center; gap: 12px;">
+          <PdfPreview 
+            :src="file" 
+            width="80px" 
+            height="100px" 
+            :scale="1"
+            @click="openPreviewModal(file, file.name)"
+          />
+          <div>
+            <span style="font-weight: 500; color: #333;">{{ file.name }}</span>
+            <div style="color: #999; font-size: 13px; margin-top: 4px;">
+              {{ formatFileSize(file.size) }}
+            </div>
+          </div>
         </div>
         <el-button type="danger" text @click="removeFile">
           <el-icon><Delete /></el-icon>
@@ -114,14 +122,42 @@
             还有 {{ result.files.length - 5 }} 个文件...
           </p>
         </div>
-        <button class="action-button" @click="downloadResult">
-          <el-icon style="margin-right: 8px;"><Download /></el-icon>
-          下载ZIP压缩包
-        </button>
+
+        <div class="result-preview-section">
+          <h4 style="margin-bottom: 12px; color: #333;">
+            <el-icon style="margin-right: 8px;"><View /></el-icon>
+            原始PDF预览
+          </h4>
+          <p style="font-size: 13px; color: #999; margin-bottom: 12px;">
+            拆分后的文件已打包至ZIP压缩包，点击下载查看
+          </p>
+          <div class="result-preview-wrapper">
+            <PdfPreview 
+              :src="file" 
+              width="150px" 
+              height="200px" 
+              :scale="1.2"
+              @click="openPreviewModal(file, file.name)"
+            />
+          </div>
+        </div>
+
+        <div style="text-align: center; margin-top: 24px;">
+          <button class="action-button" @click="downloadResult">
+            <el-icon style="margin-right: 8px;"><Download /></el-icon>
+            下载ZIP压缩包
+          </button>
+        </div>
       </div>
     </div>
 
     <LoadingOverlay :visible="loading" text="正在拆分PDF..." />
+    
+    <PdfPreviewModal 
+      v-model="previewModalVisible" 
+      :src="previewModalSrc" 
+      :title="previewModalTitle"
+    />
   </div>
 </template>
 
@@ -134,12 +170,17 @@ import {
   downloadFile 
 } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
+import PdfPreview from '../components/PdfPreview.vue'
+import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 
 const fileInput = ref(null)
 const file = ref(null)
 const isDragging = ref(false)
 const loading = ref(false)
 const result = ref(null)
+const previewModalVisible = ref(false)
+const previewModalSrc = ref(null)
+const previewModalTitle = ref('PDF预览')
 
 const splitMode = ref('pagesPerFile')
 const pagesPerFile = ref(5)
@@ -218,4 +259,23 @@ const downloadResult = () => {
     downloadFile(result.value.downloadUrl, `split_${Date.now()}.zip`)
   }
 }
+
+const openPreviewModal = (src, title) => {
+  previewModalSrc.value = src
+  previewModalTitle.value = title || 'PDF预览'
+  previewModalVisible.value = true
+}
 </script>
+
+<style scoped>
+.result-preview-section {
+  margin-top: 24px;
+  padding-top: 20px;
+  border-top: 1px solid #e5e7eb;
+}
+
+.result-preview-wrapper {
+  display: flex;
+  justify-content: center;
+}
+</style>

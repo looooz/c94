@@ -53,10 +53,26 @@
               :model-value="selectedIds.includes(item.id)"
               @change="(val) => toggleSelect(item.id, val)"
             />
-            <div class="tool-icon" :style="{ background: getTypeColor(item.type), width: '50px', height: '50px', fontSize: '24px' }">
-              <component :is="getTypeIcon(item.type)" :size="24" color="white" />
+            <div class="history-preview-wrapper">
+              <template v-if="canPreview(item)">
+                <PdfPreview 
+                  :src="getPreviewSrc(item)" 
+                  width="70px" 
+                  height="90px" 
+                  :scale="0.8"
+                  :showPageInfo="false"
+                  @click="openPreviewModal(item)"
+                />
+              </template>
+              <div v-else class="no-preview" @click="handleNoPreview(item)">
+                <el-icon color="#999" :size="28"><Document /></el-icon>
+                <span style="font-size: 10px; color: #999; margin-top: 4px;">{{ getNoPreviewText(item) }}</span>
+              </div>
             </div>
-            <div>
+            <div class="tool-icon" :style="{ background: getTypeColor(item.type), width: '40px', height: '40px', fontSize: '20px' }">
+              <component :is="getTypeIcon(item.type)" :size="20" color="white" />
+            </div>
+            <div style="flex: 1;">
               <h4 style="margin-bottom: 4px; color: #333;">{{ getTypeName(item.type) }}</h4>
               <p style="font-size: 13px; color: #666; margin-bottom: 4px;">
                 {{ item.originalName }}
@@ -80,6 +96,12 @@
     </div>
 
     <LoadingOverlay :visible="loading" text="加载中..." />
+    
+    <PdfPreviewModal 
+      v-model="previewModalVisible" 
+      :src="previewModalSrc" 
+      :title="previewModalTitle"
+    />
   </div>
 </template>
 
@@ -100,11 +122,17 @@ import {
   downloadFile
 } from '../utils/api'
 import LoadingOverlay from '../components/LoadingOverlay.vue'
+import PdfPreview from '../components/PdfPreview.vue'
+import PdfPreviewModal from '../components/PdfPreviewModal.vue'
 
 const router = useRouter()
 const historyList = ref([])
 const loading = ref(false)
 const selectedIds = ref([])
+
+const previewModalVisible = ref(false)
+const previewModalSrc = ref(null)
+const previewModalTitle = ref('PDF预览')
 
 const typeIcons = {
   'merge': Fold,
@@ -158,6 +186,41 @@ const formatDate = (dateStr) => {
     hour: '2-digit',
     minute: '2-digit'
   })
+}
+
+const canPreview = (item) => {
+  if (!item || !item.downloadUrl) return false
+  const url = item.downloadUrl.toLowerCase()
+  if (url.endsWith('.zip')) return false
+  if (url.endsWith('.pdf')) return true
+  return false
+}
+
+const getPreviewSrc = (item) => {
+  if (!item || !item.downloadUrl) return null
+  return item.downloadUrl
+}
+
+const getNoPreviewText = (item) => {
+  if (!item) return '无法预览'
+  if (item.downloadUrl && item.downloadUrl.toLowerCase().endsWith('.zip')) {
+    return '压缩包'
+  }
+  return '无法预览'
+}
+
+const handleNoPreview = (item) => {
+  ElMessage.info('该文件类型暂不支持预览，请下载后查看')
+}
+
+const openPreviewModal = (item) => {
+  if (!canPreview(item)) {
+    handleNoPreview(item)
+    return
+  }
+  previewModalSrc.value = getPreviewSrc(item)
+  previewModalTitle.value = item.originalName || item.fileName || 'PDF预览'
+  previewModalVisible.value = true
 }
 
 const loadHistory = async () => {
@@ -244,3 +307,37 @@ onMounted(() => {
   loadHistory()
 })
 </script>
+
+<style scoped>
+.history-preview-wrapper {
+  flex-shrink: 0;
+}
+
+.no-preview {
+  width: 70px;
+  height: 90px;
+  border: 1px dashed #ddd;
+  border-radius: 8px;
+  background: #f9fafb;
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  cursor: pointer;
+  transition: all 0.2s;
+}
+
+.no-preview:hover {
+  border-color: #667eea;
+  background: #f0f7ff;
+}
+
+.history-item {
+  align-items: center;
+}
+
+.history-item > div:first-child {
+  flex: 1;
+  min-width: 0;
+}
+</style>
