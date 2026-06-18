@@ -4,7 +4,10 @@
     :title="title"
     width="900px"
     :close-on-click-modal="false"
+    :append-to-body="true"
+    :destroy-on-close="false"
     @close="handleClose"
+    @opened="handleDialogOpened"
     class="pdf-preview-modal"
   >
     <div v-if="loading" class="modal-loading">
@@ -14,22 +17,37 @@
     <div v-if="error" class="modal-error">
       <el-icon :size="48" color="#f56c6c"><Warning /></el-icon>
       <p style="margin-top: 16px; color: #666;">无法加载PDF文件</p>
+      <el-button type="primary" style="margin-top: 20px;" @click="retryLoad">
+        <el-icon><Refresh /></el-icon>
+        重新加载
+      </el-button>
     </div>
-    <div class="pdf-viewer" :style="{ display: error ? 'none' : 'block' }">
+    <div class="pdf-viewer" :style="{ display: error ? 'none' : 'flex' }">
       <div class="viewer-toolbar">
         <div class="toolbar-info">
-          第 {{ currentPage }} / {{ totalPages }} 页
+          <el-icon><Document /></el-icon>
+          <span v-if="totalPages > 0">第 {{ currentPage }} / {{ totalPages }} 页</span>
+          <span v-else>加载中...</span>
         </div>
         <div class="toolbar-controls">
           <el-button 
-            :disabled="currentPage === 1" 
+            :disabled="currentPage <= 1 || totalPages === 0" 
             @click="prevPage"
             size="small"
           >
             <el-icon><ArrowLeft /></el-icon> 上一页
           </el-button>
+          <el-pagination
+            v-if="totalPages > 0"
+            v-model:current-page="currentPage"
+            :page-count="totalPages"
+            :page-size="1"
+            layout="prev, pager, next"
+            size="small"
+            @current-change="(p) => renderPage(p)"
+          />
           <el-button 
-            :disabled="currentPage === totalPages" 
+            :disabled="currentPage >= totalPages || totalPages === 0" 
             @click="nextPage"
             size="small"
           >
@@ -77,22 +95,54 @@ const totalPages = ref(0)
 const currentPage = ref(1)
 const viewerCanvas = ref(null)
 let pdfDoc = null
+let pendingLoad = false
+let loadAttempts = 0
+const MAX_LOAD_ATTEMPTS = 3
 
 watch(() => props.modelValue, (val) => {
   visible.value = val
-  if (val && props.src) {
-    loadPdf()
+  if (val) {
+    pendingLoad = true
+    loadAttempts = 0
+  } else {
+    pendingLoad = false
   }
 })
 
 watch(() => props.src, () => {
   if (visible.value) {
-    loadPdf()
+    pendingLoad = true
+    loadAttempts = 0
+    tryStartLoad()
   }
 })
 
-const loadPdf = async () => {
+const handleDialogOpened = async () => {
+  await nextTick()
+  if (pendingLoad && props.src) {
+    tryStartLoad()
+  }
+}
 
+const tryStartLoad = async () => {
+  if (!viewerCanvas.value) {
+    loadAttempts++
+    if (loadAttempts <= MAX_LOAD_ATTEMPTS) {
+      await nextTick()
+      setTimeout(() => {
+        tryStartLoad()
+      }, 50 * loadAttempts)
+    } else {
+      console.error('Canvas element not available after multiple attempts')
+      error.value = true
+    }
+    return
+  }
+  pendingLoad = false
+  loadPdf()
+}
+
+const loadPdf = async () => {
   if (!props.src) {
     error.value = true
     return
@@ -103,39 +153,65 @@ const loadPdf = async () => {
   totalPages.value = 0
   currentPage.value = 1
 
-  try {
-    let arrayBuffer
-    if (props.src instanceof File) {
-      arrayBuffer = await props.src.arrayBuffer()
-    } else if (typeof props.src === 'string') {
-      const response = await fetch(props.src)
-      arrayBuffer = await response.arrayBuffer()
+  let maxAttempts = 3
+  let attempt = 0
+
+  while (attempt < maxAttempts) {
+    try {
+      let arrayBuffer
+      if (props.src instanceof File) {
+        arrayBuffer = await props.src.arrayBuffer()
+      } else if (typeof props.src === 'string') {
+        const response = await fetch(props.src)
+        arrayBuffer = await response.arrayBuffer()
+      }
+
+      if (!arrayBuffer) {
+        throw new Error('Invalid source')
+      }
+
+      pdfDoc = await pdfjsLib.getDocument({
+        data: arrayBuffer,
+        cMapUrl: cMapBaseUrl,
+        cMapPacked: true
+      }).promise
+      totalPages.value = pdfDoc.numPages
+
+      await nextTick()
+      if (!viewerCanvas.value) {
+        await new Promise(resolve => setTimeout(resolve, 100))
+        await nextTick()
+      }
+      await renderPage(1)
+      error.value = false
+      break
+    } catch (err) {
+      attempt++
+      console.error(`Failed to load PDF (attempt ${attempt}/${maxAttempts}):`, err)
+      if (attempt >= maxAttempts) {
+        error.value = true
+      } else {
+        await new Promise(resolve => setTimeout(resolve, 200 * attempt))
+      }
     }
-
-    if (!arrayBuffer) {
-      throw new Error('Invalid source')
-    }
-
-    pdfDoc = await pdfjsLib.getDocument({
-      data: arrayBuffer,
-      cMapUrl: cMapBaseUrl,
-      cMapPacked: true
-    }).promise
-    totalPages.value = pdfDoc.numPages
-
-    await nextTick()
-    await renderPage(1)
-  } catch (err) {
-    console.error('Failed to load PDF for modal preview:', err)
-    error.value = true
-  } finally {
-    loading.value = false
   }
+
+  loading.value = false
 }
 
 const renderPage = async (pageNum) => {
+  if (!viewerCanvas.value) {
+    await nextTick()
+    if (!viewerCanvas.value) {
+      console.warn('Viewer canvas is not available')
+      return
+    }
+  }
 
-  if (!viewerCanvas.value || !pdfDoc) return
+  if (!pdfDoc) {
+    console.warn('PDF document is not loaded')
+    return
+  }
 
   try {
     const page = await pdfDoc.getPage(pageNum)
@@ -152,9 +228,17 @@ const renderPage = async (pageNum) => {
     }).promise
   } catch (err) {
     if (err?.name !== 'RenderingCancelledException') {
+      console.error('Failed to render page:', err)
       throw err
     }
   }
+}
+
+const retryLoad = () => {
+  loadAttempts = 0
+  pendingLoad = true
+  error.value = false
+  tryStartLoad()
 }
 
 const prevPage = () => {
@@ -173,12 +257,14 @@ const nextPage = () => {
 
 const handleClose = () => {
   emit('update:modelValue', false)
+  pendingLoad = false
   if (pdfDoc) {
     pdfDoc = null
   }
 }
 
 onBeforeUnmount(() => {
+  pendingLoad = false
   if (pdfDoc) {
     pdfDoc = null
   }
