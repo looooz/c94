@@ -215,26 +215,35 @@ const renderPage = async (pageNum) => {
 
   try {
     const page = await pdfDoc.getPage(pageNum)
+    const container = viewerCanvas.value.parentElement
+    const containerWidth = container?.clientWidth || 900
+    const containerHeight = container?.clientHeight || 600
+    const padding = 40
+
+    const availW = Math.max(containerWidth - padding * 2, 100)
+    const availH = Math.max(containerHeight - padding * 2, 100)
+
     const rawViewport = page.getViewport({ scale: 1 })
-    const isLandscape = rawViewport.width > rawViewport.height
+    const scaleW = availW / rawViewport.width
+    const scaleH = availH / rawViewport.height
+    const fitScale = Math.min(scaleW, scaleH)
+
+    const dpr = window.devicePixelRatio || 1
+    const renderScale = Math.max(fitScale * dpr, dpr * 1.5)
     
-    let maxWidth = 1200
-    let maxHeight = 1600
-    if (isLandscape) {
-      maxWidth = 1600
-      maxHeight = 1200
-    }
-    
-    const scaleX = maxWidth / rawViewport.width
-    const scaleY = maxHeight / rawViewport.height
-    const baseScale = Math.min(scaleX, scaleY)
-    const scale = Math.max(baseScale, 2)
-    
-    const viewport = page.getViewport({ scale })
+    const viewport = page.getViewport({ scale: renderScale })
     const context = viewerCanvas.value.getContext('2d')
     
-    viewerCanvas.value.width = viewport.width
-    viewerCanvas.value.height = viewport.height
+    viewerCanvas.value.width = Math.floor(viewport.width)
+    viewerCanvas.value.height = Math.floor(viewport.height)
+
+    viewerCanvas.value.style.width = 'auto'
+    viewerCanvas.value.style.height = 'auto'
+    viewerCanvas.value.style.display = 'block'
+    
+    context.clearRect(0, 0, viewport.width, viewport.height)
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, viewport.width, viewport.height)
     
     await page.render({
       canvasContext: context,

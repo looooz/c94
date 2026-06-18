@@ -20,7 +20,7 @@ const parseColor = (colorStr) => {
   return { r: 0, g: 0, b: 0 };
 };
 
-const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, watermarkHeight, margin = 30, spacingMultiplier = 1.0) => {
+const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, watermarkHeight, margin = 30, spacingXMultiplier = 1.0, spacingYMultiplier = 1.0) => {
   const positions = [];
   const centerX = (pageWidth - watermarkWidth) / 2;
   const centerY = (pageHeight - watermarkHeight) / 2;
@@ -60,8 +60,8 @@ const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, 
     case 'tiled': {
       const baseSpacingX = watermarkWidth * 1.6;
       const baseSpacingY = watermarkHeight * 2.5;
-      const spacingX = baseSpacingX * spacingMultiplier;
-      const spacingY = baseSpacingY * spacingMultiplier;
+      const spacingX = baseSpacingX * spacingXMultiplier;
+      const spacingY = baseSpacingY * spacingYMultiplier;
       const cols = Math.ceil(pageWidth / spacingX) + 4;
       const rows = Math.ceil(pageHeight / spacingY) + 4;
       for (let r = 0; r < rows; r++) {
@@ -79,8 +79,8 @@ const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, 
     case 'full-tiled': {
       const baseFullSpacingX = watermarkWidth * 1.2;
       const baseFullSpacingY = watermarkHeight * 2.0;
-      const fullSpacingX = baseFullSpacingX * spacingMultiplier;
-      const fullSpacingY = baseFullSpacingY * spacingMultiplier;
+      const fullSpacingX = baseFullSpacingX * spacingXMultiplier;
+      const fullSpacingY = baseFullSpacingY * spacingYMultiplier;
       const fullCols = Math.ceil(pageWidth / fullSpacingX) + 4;
       const fullRows = Math.ceil(pageHeight / fullSpacingY) + 4;
       for (let r = 0; r < fullRows; r++) {
@@ -120,7 +120,8 @@ router.post('/', upload.fields([{ name: 'pdf', maxCount: 1 }, { name: 'watermark
       rotation = 0,
       fontFamily = 'Helvetica',
       imageScale = 0.5,
-      watermarkSpacing = 1.0
+      watermarkSpacingX = 1.0,
+      watermarkSpacingY = 1.0
     } = req.body;
 
     const pdfBytes = fs.readFileSync(pdfFile.path);
@@ -200,7 +201,7 @@ router.post('/', upload.fields([{ name: 'pdf', maxCount: 1 }, { name: 'watermark
       const { width: pageWidth, height: pageHeight } = page.getSize();
 
       if (type === 'text' && !hasChinese && watermarkFont) {
-        const positions = getWatermarkPositions(pageWidth, pageHeight, position, textWidth, textHeight, 30, parseFloat(watermarkSpacing) || 1.0);
+        const positions = getWatermarkPositions(pageWidth, pageHeight, position, textWidth, textHeight, 30, parseFloat(watermarkSpacingX) || 1.0, parseFloat(watermarkSpacingY) || 1.0);
 
         for (const pos of positions) {
           const rotateAngle = pos.rotate !== undefined ? pos.rotate : rotationNum;
@@ -215,7 +216,7 @@ router.post('/', upload.fields([{ name: 'pdf', maxCount: 1 }, { name: 'watermark
           });
         }
       } else if (useImageMode && embeddedWatermarkImage) {
-        const positions = getWatermarkPositions(pageWidth, pageHeight, position, watermarkImgWidth, watermarkImgHeight, 30, parseFloat(watermarkSpacing) || 1.0);
+        const positions = getWatermarkPositions(pageWidth, pageHeight, position, watermarkImgWidth, watermarkImgHeight, 30, parseFloat(watermarkSpacingX) || 1.0, parseFloat(watermarkSpacingY) || 1.0);
 
         for (const pos of positions) {
           const rotateAngle = pos.rotate !== undefined ? pos.rotate : rotationNum;

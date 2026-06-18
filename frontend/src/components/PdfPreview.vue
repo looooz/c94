@@ -124,23 +124,28 @@ const renderPage = async (pageNum) => {
     const page = await pdfDoc.getPage(pageNum)
     const rawViewport = page.getViewport({ scale: 1 })
     
-    const wrapperWidth = previewCanvas.value.parentElement.clientWidth
-    const wrapperHeight = previewCanvas.value.parentElement.clientHeight
+    const wrapper = previewCanvas.value.parentElement
+    const wrapperWidth = wrapper.clientWidth
+    const wrapperHeight = wrapper.clientHeight
     
     const padding = 8
-    const availableWidth = Math.max(wrapperWidth - padding * 2, 50)
-    const availableHeight = Math.max(wrapperHeight - padding * 2, 50)
+    const availW = Math.max(wrapperWidth - padding * 2, 20)
+    const availH = Math.max(wrapperHeight - padding * 2, 20)
     
-    const scaleX = availableWidth / rawViewport.width
-    const scaleY = availableHeight / rawViewport.height
-    const adaptiveScale = Math.min(scaleX, scaleY)
+    const scaleW = availW / rawViewport.width
+    const scaleH = availH / rawViewport.height
+    const fitScale = Math.min(scaleW, scaleH)
     
-    const finalScale = Math.max(adaptiveScale, props.scale * 0.5, 0.5)
-    const viewport = page.getViewport({ scale: finalScale })
+    const dpr = window.devicePixelRatio || 1
+    const renderScale = Math.max(fitScale * dpr, dpr)
+    const viewport = page.getViewport({ scale: renderScale })
     const context = previewCanvas.value.getContext('2d')
     
-    previewCanvas.value.width = viewport.width
-    previewCanvas.value.height = viewport.height
+    previewCanvas.value.width = Math.floor(viewport.width)
+    previewCanvas.value.height = Math.floor(viewport.height)
+    
+    previewCanvas.value.style.width = `${Math.floor(viewport.width / dpr)}px`
+    previewCanvas.value.style.height = `${Math.floor(viewport.height / dpr)}px`
     
     await page.render({
       canvasContext: context,
@@ -206,11 +211,9 @@ defineExpose({
 }
 
 .preview-canvas {
-  max-width: 100%;
-  max-height: 100%;
   background: white;
   display: block;
-  object-fit: contain;
+  box-shadow: 0 1px 3px rgba(0, 0, 0, 0.1);
 }
 
 .preview-loading {

@@ -247,10 +247,18 @@
             </div>
 
             <div class="setting-row" v-if="isTiledPosition">
-              <span class="setting-label">水印间距</span>
+              <span class="setting-label">水平间距</span>
               <div class="setting-control-inline">
-                <el-slider v-model="watermarkSpacing" :min="0.5" :max="3.0" :step="0.1" class="control-slider" />
-                <el-tag type="info" effect="plain" class="scale-tag">{{ watermarkSpacing.toFixed(1) }}x</el-tag>
+                <el-slider v-model="watermarkSpacingX" :min="0.5" :max="3.0" :step="0.1" class="control-slider" />
+                <el-tag type="info" effect="plain" class="scale-tag">{{ watermarkSpacingX.toFixed(1) }}x</el-tag>
+              </div>
+            </div>
+
+            <div class="setting-row" v-if="isTiledPosition">
+              <span class="setting-label">垂直间距</span>
+              <div class="setting-control-inline">
+                <el-slider v-model="watermarkSpacingY" :min="0.5" :max="3.0" :step="0.1" class="control-slider" />
+                <el-tag type="info" effect="plain" class="scale-tag">{{ watermarkSpacingY.toFixed(1) }}x</el-tag>
               </div>
             </div>
           </div>
@@ -473,7 +481,8 @@ const imageScale = ref(0.5)
 const position = ref('center')
 const opacity = ref(0.3)
 const rotation = ref(0)
-const watermarkSpacing = ref(1.0)
+const watermarkSpacingX = ref(1.0)
+const watermarkSpacingY = ref(1.0)
 
 const beforePreviewCanvas = ref(null)
 const beforeCompareCanvas = ref(null)
@@ -557,11 +566,12 @@ const tiledWatermarkList = computed(() => {
     ? approxFontSize * 1.5
     : 60 * imageScale.value
   
-  const spacingMul = watermarkSpacing.value
+  const spacingMulX = watermarkSpacingX.value
+  const spacingMulY = watermarkSpacingY.value
   const baseSpacingX = isFullTiled ? approxWidth * 1.2 : approxWidth * 1.6
   const baseSpacingY = isFullTiled ? approxHeight * 2.0 : approxHeight * 2.5
-  const spacingX = baseSpacingX * spacingMul
-  const spacingY = baseSpacingY * spacingMul
+  const spacingX = baseSpacingX * spacingMulX
+  const spacingY = baseSpacingY * spacingMulY
   
   const cols = Math.ceil(PREVIEW_BOX_WIDTH / spacingX) + 4
   const rows = Math.ceil(PREVIEW_BOX_HEIGHT / spacingY) + 4
@@ -585,16 +595,17 @@ const tiledWatermarkList = computed(() => {
   return result
 })
 
-const computeAdaptiveScale = (page, containerWidth, containerHeight, minScale = 2.0) => {
+const computeFitScale = (page, containerWidth) => {
   const viewport = page.getViewport({ scale: 1 })
   const padding = 48
-  const availableW = Math.max(containerWidth - padding, 50)
-  const availableH = Math.max(containerHeight - padding, 50)
-  const scaleX = availableW / viewport.width
-  const scaleY = availableH / viewport.height
-  const fitScale = Math.min(scaleX, scaleY)
+  const availW = Math.max(containerWidth - padding, 50)
+  return availW / viewport.width
+}
+
+const computeRenderScale = (page, containerWidth) => {
+  const fitScale = computeFitScale(page, containerWidth)
   const dpr = window.devicePixelRatio || 1
-  return Math.max(fitScale, minScale, dpr)
+  return Math.max(fitScale * dpr, dpr * 1.5)
 }
 
 const generateWatermarkImage = () => {
@@ -674,6 +685,18 @@ const handleDrop = async (e) => {
   }
 }
 
+const waitForCanvasReady = async (canvasRef, maxAttempts = 20, interval = 60) => {
+  for (let i = 0; i < maxAttempts; i++) {
+    const canvas = canvasRef.value
+    if (canvas && canvas.parentElement && canvas.parentElement.clientWidth > 0) {
+      return true
+    }
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, interval))
+  }
+  return false
+}
+
 const loadPdfForPreview = async (pdfFile) => {
   try {
     const arrayBuffer = await pdfFile.arrayBuffer()
@@ -685,15 +708,13 @@ const loadPdfForPreview = async (pdfFile) => {
     totalPages.value = pdfDoc.value.numPages
     currentPage.value = 1
     comparePage.value = 1
+
     await nextTick()
-    
-    let attempts = 0
-    while (!beforePreviewCanvas.value && attempts < 10) {
-      await nextTick()
-      await new Promise(resolve => setTimeout(resolve, 50))
-      attempts++
+    const ready = await waitForCanvasReady(beforePreviewCanvas)
+    if (!ready) {
+      console.warn('[loadPdfForPreview] beforePreviewCanvas not ready after max attempts')
     }
-    
+
     await renderPreviewPage('before', 1)
   } catch (error) {
     console.error('Failed to load PDF for preview:', error)
@@ -703,6 +724,9 @@ const loadPdfForPreview = async (pdfFile) => {
 const loadAfterPdfForPreview = async (downloadUrl) => {
   try {
     const response = await fetch(downloadUrl)
+    if (!response.ok) {
+      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
+    }
     const arrayBuffer = await response.arrayBuffer()
     afterPdfDoc.value = await pdfjsLib.getDocument({
       data: arrayBuffer,
@@ -711,33 +735,30 @@ const loadAfterPdfForPreview = async (downloadUrl) => {
     }).promise
     comparePage.value = 1
 
-    await nextTick()
-
-    let attempts = 0
-    const MAX_ATTEMPTS = 20
-    while (attempts < MAX_ATTEMPTS) {
-      const hasBefore = beforeCompareCanvas.value
-      const hasAfter = afterPreviewCanvas.value
-      const beforeContainerReady = hasBefore?.parentElement?.clientWidth > 0 && hasBefore?.parentElement?.clientHeight > 0
-      const afterContainerReady = hasAfter?.parentElement?.clientWidth > 0 && hasAfter?.parentElement?.clientHeight > 0
-      if (hasBefore && hasAfter && beforeContainerReady && afterContainerReady) break
-      await nextTick()
-      await new Promise(resolve => setTimeout(resolve, 80))
-      attempts++
+    const beforeReady = await waitForCanvasReady(beforeCompareCanvas)
+    const afterReady = await waitForCanvasReady(afterPreviewCanvas)
+    
+    if (!beforeReady) {
+      console.warn('[loadAfterPdfForPreview] beforeCompareCanvas not ready')
     }
-
-    if (attempts >= MAX_ATTEMPTS) {
-      console.warn('[loadAfterPdfForPreview] Max DOM wait attempts reached, proceeding anyway')
+    if (!afterReady) {
+      console.warn('[loadAfterPdfForPreview] afterPreviewCanvas not ready')
     }
-
-    await nextTick()
-    await new Promise(resolve => setTimeout(resolve, 100))
 
     await renderComparePages(1)
   } catch (error) {
     console.error('Failed to load processed PDF for preview:', error)
+    ElMessage.error('处理后预览加载失败：' + error.message)
   }
 }
+
+watch(result, async (newResult) => {
+  if (newResult?.downloadUrl) {
+    await nextTick()
+    await nextTick()
+    await loadAfterPdfForPreview(newResult.downloadUrl)
+  }
+})
 
 const renderPreviewPage = async (type, pageNum) => {
   let canvas = null
@@ -763,17 +784,27 @@ const renderPreviewPage = async (type, pageNum) => {
     const page = await doc.getPage(pageNum)
     const container = canvas.parentElement
     const containerWidth = container?.clientWidth || 800
-    const containerHeight = container?.clientHeight || 600
-    const scale = computeAdaptiveScale(page, containerWidth, containerHeight)
-    const viewport = page.getViewport({ scale })
+
+    const fitScale = computeFitScale(page, containerWidth)
+    const renderScale = computeRenderScale(page, containerWidth)
+    const viewport = page.getViewport({ scale: renderScale })
     const context = canvas.getContext('2d')
+
     canvas.width = Math.floor(viewport.width)
     canvas.height = Math.floor(viewport.height)
-    canvas.style.width = 'auto'
-    canvas.style.height = 'auto'
+
+    const rawViewport = page.getViewport({ scale: 1 })
+    const cssWidth = Math.floor(rawViewport.width * fitScale)
+    const cssHeight = Math.floor(rawViewport.height * fitScale)
+    canvas.style.width = `${cssWidth}px`
+    canvas.style.height = `${cssHeight}px`
+    canvas.style.display = 'block'
+    canvas.style.maxWidth = 'none'
+
     context.clearRect(0, 0, canvas.width, canvas.height)
     context.fillStyle = '#ffffff'
     context.fillRect(0, 0, canvas.width, canvas.height)
+
     await page.render({
       canvasContext: context,
       viewport: viewport
@@ -837,7 +868,8 @@ const addWatermark = async () => {
     position: position.value,
     rotation: rotation.value,
     imageScale: hasChinese.value ? 1.0 : imageScale.value,
-    watermarkSpacing: watermarkSpacing.value
+    watermarkSpacingX: watermarkSpacingX.value,
+    watermarkSpacingY: watermarkSpacingY.value
   }
 
   loading.value = true
@@ -847,7 +879,6 @@ const addWatermark = async () => {
     const response = await addWatermarkApi(file.value, uploadWatermarkImage, options)
     result.value = response.data
     ElMessage.success('水印添加成功！')
-    await loadAfterPdfForPreview(response.data.downloadUrl)
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '添加水印失败，请重试')
   } finally {
