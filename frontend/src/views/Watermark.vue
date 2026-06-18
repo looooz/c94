@@ -258,28 +258,45 @@
           </div>
           <div class="section-content">
             <div class="watermark-preview-wrapper">
-              <div class="preview-page">
+              <div class="preview-page" ref="previewPageRef">
                 <div class="page-lines">
                   <div v-for="i in 8" :key="i" class="page-line"></div>
                 </div>
-                <div 
-                  v-if="watermarkType === 'text'"
-                  class="watermark-layer"
-                  :style="previewStyle"
-                >
-                  {{ watermarkText || '水印文字' }}
-                </div>
-                <div 
-                  v-else-if="watermarkImagePreview"
-                  class="watermark-layer"
-                  :style="previewStyle"
-                >
-                  <img :src="watermarkImagePreview" class="watermark-img" />
-                </div>
-                <div v-else class="watermark-placeholder">
-                  <el-icon color="#ccc"><Picture /></el-icon>
-                  <span>请选择水印图片</span>
-                </div>
+                <template v-if="isTiledPosition">
+                  <div 
+                    v-for="(wm, idx) in tiledWatermarkList" 
+                    :key="idx"
+                    class="watermark-layer tiled-watermark"
+                    :style="wm.style"
+                  >
+                    <template v-if="watermarkType === 'text'">
+                      {{ watermarkText || '水印文字' }}
+                    </template>
+                    <template v-else-if="watermarkImagePreview">
+                      <img :src="watermarkImagePreview" class="watermark-img" />
+                    </template>
+                  </div>
+                </template>
+                <template v-else>
+                  <div 
+                    v-if="watermarkType === 'text'"
+                    class="watermark-layer"
+                    :style="previewStyle"
+                  >
+                    {{ watermarkText || '水印文字' }}
+                  </div>
+                  <div 
+                    v-else-if="watermarkImagePreview"
+                    class="watermark-layer"
+                    :style="previewStyle"
+                  >
+                    <img :src="watermarkImagePreview" class="watermark-img" />
+                  </div>
+                  <div v-else class="watermark-placeholder">
+                    <el-icon color="#ccc"><Picture /></el-icon>
+                    <span>请选择水印图片</span>
+                  </div>
+                </template>
               </div>
             </div>
           </div>
@@ -413,7 +430,7 @@
 </template>
 
 <script setup>
-import { ref, computed, watch, nextTick } from 'vue'
+import { ref, computed, watch, nextTick, onMounted } from 'vue'
 import { ElMessage } from 'element-plus'
 import { 
   addWatermark as addWatermarkApi, 
@@ -452,6 +469,7 @@ const rotation = ref(0)
 const beforePreviewCanvas = ref(null)
 const beforeCompareCanvas = ref(null)
 const afterPreviewCanvas = ref(null)
+const previewPageRef = ref(null)
 const pdfDoc = ref(null)
 const afterPdfDoc = ref(null)
 const totalPages = ref(0)
@@ -461,6 +479,9 @@ const comparePage = ref(1)
 const previewModalVisible = ref(false)
 const previewModalSrc = ref(null)
 const previewModalTitle = ref('PDF预览')
+
+const PREVIEW_BOX_WIDTH = 500
+const PREVIEW_BOX_HEIGHT = 350
 
 const hasChinese = computed(() => {
   return /[\u4e00-\u9fa5]/.test(watermarkText.value)
@@ -472,15 +493,27 @@ const canSubmit = computed(() => {
   return true
 })
 
-const previewStyle = computed(() => {
-  const baseStyle = {
+const isTiledPosition = computed(() => {
+  return position.value === 'tiled' || position.value === 'full-tiled'
+})
+
+const getWatermarkBaseStyle = () => {
+  const baseFontSize = watermarkType.value === 'text' ? Math.max(fontSize.value / 3, 14) : undefined
+  return {
     opacity: opacity.value,
-    transform: `rotate(${rotation.value}deg)`,
     color: watermarkType.value === 'text' ? fontColor.value : undefined,
-    fontSize: watermarkType.value === 'text' ? `${fontSize.value / 3}px` : undefined,
+    fontSize: baseFontSize ? `${baseFontSize}px` : undefined,
     fontFamily: fontFamily.value,
-    fontWeight: fontFamily.value.includes('Bold') ? 'bold' : 'normal'
+    fontWeight: fontFamily.value.includes('Bold') ? 'bold' : 'normal',
+    whiteSpace: 'nowrap'
   }
+}
+
+const previewStyle = computed(() => {
+  if (isTiledPosition.value) {
+    return {}
+  }
+  const baseStyle = getWatermarkBaseStyle()
   
   const positions = {
     'top-left': { top: '20px', left: '20px' },
@@ -491,13 +524,73 @@ const previewStyle = computed(() => {
     'center-right': { top: '50%', right: '20px', transform: `translateY(-50%) rotate(${rotation.value}deg)` },
     'bottom-left': { bottom: '20px', left: '20px' },
     'bottom-center': { bottom: '20px', left: '50%', transform: `translateX(-50%) rotate(${rotation.value}deg)` },
-    'bottom-right': { bottom: '20px', right: '20px' },
-    'tiled': { top: '50%', left: '50%', transform: `translate(-50%, -50%) rotate(-30deg)` },
-    'full-tiled': { top: '50%', left: '50%', transform: `translate(-50%, -50%) rotate(-45deg)` }
+    'bottom-right': { bottom: '20px', right: '20px' }
   }
   
   return { ...baseStyle, ...positions[position.value], position: 'absolute' }
 })
+
+const tiledWatermarkList = computed(() => {
+  if (!isTiledPosition.value) return []
+  
+  const result = []
+  const baseStyle = getWatermarkBaseStyle()
+  const isFullTiled = position.value === 'full-tiled'
+  const rotateAngle = isFullTiled ? -45 : -30
+  
+  const text = watermarkText.value || '水印文字'
+  const approxFontSize = watermarkType.value === 'text' ? Math.max(fontSize.value / 3, 14) : 50
+  const charWidth = approxFontSize * 0.6
+  const approxWidth = watermarkType.value === 'text' 
+    ? Math.max(text.length * charWidth, 80)
+    : 100 * imageScale.value
+  const approxHeight = watermarkType.value === 'text'
+    ? approxFontSize * 1.5
+    : 60 * imageScale.value
+  
+  const spacingX = isFullTiled ? approxWidth * 0.6 : approxWidth * 0.8
+  const spacingY = isFullTiled ? approxHeight * 1.2 : approxHeight * 1.5
+  
+  const cols = Math.ceil(PREVIEW_BOX_WIDTH / spacingX) + 3
+  const rows = Math.ceil(PREVIEW_BOX_HEIGHT / spacingY) + 3
+  
+  for (let r = 0; r < rows; r++) {
+    for (let c = 0; c < cols; c++) {
+      const offsetX = r % 2 === 0 ? 0 : spacingX / 2
+      result.push({
+        style: {
+          ...baseStyle,
+          position: 'absolute',
+          left: `${c * spacingX - approxWidth * (isFullTiled ? 1.5 : 1) + offsetX}px`,
+          top: `${r * spacingY - approxHeight}px`,
+          transform: `rotate(${rotateAngle}deg)`,
+          transformOrigin: 'center center'
+        }
+      })
+    }
+  }
+  
+  return result
+})
+
+const computeAdaptiveScale = (page, targetMaxWidth = 900, targetMaxHeight = 1200) => {
+  const viewport = page.getViewport({ scale: 1 })
+  const isLandscape = viewport.width > viewport.height
+  
+  let maxWidth = targetMaxWidth
+  let maxHeight = targetMaxHeight
+  
+  if (isLandscape) {
+    maxWidth = targetMaxHeight
+    maxHeight = targetMaxWidth
+  }
+  
+  const scaleX = maxWidth / viewport.width
+  const scaleY = maxHeight / viewport.height
+  const baseScale = Math.min(scaleX, scaleY)
+  
+  return Math.max(baseScale, 1.5)
+}
 
 const generateWatermarkImage = () => {
   if (!hasChinese.value || !watermarkText.value.trim()) {
@@ -586,7 +679,16 @@ const loadPdfForPreview = async (pdfFile) => {
     }).promise
     totalPages.value = pdfDoc.value.numPages
     currentPage.value = 1
+    comparePage.value = 1
     await nextTick()
+    
+    let attempts = 0
+    while (!beforePreviewCanvas.value && attempts < 10) {
+      await nextTick()
+      await new Promise(resolve => setTimeout(resolve, 50))
+      attempts++
+    }
+    
     await renderPreviewPage('before', 1)
   } catch (error) {
     console.error('Failed to load PDF for preview:', error)
@@ -604,6 +706,14 @@ const loadAfterPdfForPreview = async (downloadUrl) => {
     }).promise
     comparePage.value = 1
     await nextTick()
+    
+    let attempts = 0
+    while ((!beforeCompareCanvas.value || !afterPreviewCanvas.value) && attempts < 10) {
+      await nextTick()
+      await new Promise(resolve => setTimeout(resolve, 50))
+      attempts++
+    }
+    
     await renderComparePages(1)
   } catch (error) {
     console.error('Failed to load processed PDF for preview:', error)
@@ -611,19 +721,36 @@ const loadAfterPdfForPreview = async (downloadUrl) => {
 }
 
 const renderPreviewPage = async (type, pageNum) => {
-  const canvas = type === 'before' ? beforePreviewCanvas.value : beforeCompareCanvas.value
-  if (!canvas || !pdfDoc.value) return
+  let canvas = null
+  let doc = null
   
-  const page = await pdfDoc.value.getPage(pageNum)
-  const viewport = page.getViewport({ scale: 1.5 })
-  const context = canvas.getContext('2d')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
+  if (type === 'before') {
+    canvas = beforePreviewCanvas.value
+    doc = pdfDoc.value
+  } else if (type === 'before-compare') {
+    canvas = beforeCompareCanvas.value
+    doc = pdfDoc.value
+  }
   
-  await page.render({
-    canvasContext: context,
-    viewport: viewport
-  }).promise
+  if (!canvas || !doc) return
+  
+  try {
+    const page = await doc.getPage(pageNum)
+    const scale = computeAdaptiveScale(page)
+    const viewport = page.getViewport({ scale })
+    const context = canvas.getContext('2d')
+    canvas.width = viewport.width
+    canvas.height = viewport.height
+    
+    await page.render({
+      canvasContext: context,
+      viewport: viewport
+    }).promise
+  } catch (err) {
+    if (err?.name !== 'RenderingCancelledException') {
+      console.error('Failed to render preview page:', err)
+    }
+  }
 }
 
 const renderComparePages = async (pageNum) => {
@@ -632,16 +759,23 @@ const renderComparePages = async (pageNum) => {
   const canvas = afterPreviewCanvas.value
   if (!canvas || !afterPdfDoc.value) return
   
-  const page = await afterPdfDoc.value.getPage(pageNum)
-  const viewport = page.getViewport({ scale: 1.5 })
-  const context = canvas.getContext('2d')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  
-  await page.render({
-    canvasContext: context,
-    viewport: viewport
-  }).promise
+  try {
+    const page = await afterPdfDoc.value.getPage(pageNum)
+    const scale = computeAdaptiveScale(page)
+    const viewport = page.getViewport({ scale })
+    const context = canvas.getContext('2d')
+    canvas.width = viewport.width
+    canvas.height = viewport.height
+    
+    await page.render({
+      canvasContext: context,
+      viewport: viewport
+    }).promise
+  } catch (err) {
+    if (err?.name !== 'RenderingCancelledException') {
+      console.error('Failed to render compare page:', err)
+    }
+  }
 }
 
 const handleWatermarkImageSelect = (uploadFile) => {

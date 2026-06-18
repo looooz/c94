@@ -215,7 +215,21 @@ const renderPage = async (pageNum) => {
 
   try {
     const page = await pdfDoc.getPage(pageNum)
-    const scale = 2
+    const rawViewport = page.getViewport({ scale: 1 })
+    const isLandscape = rawViewport.width > rawViewport.height
+    
+    let maxWidth = 1200
+    let maxHeight = 1600
+    if (isLandscape) {
+      maxWidth = 1600
+      maxHeight = 1200
+    }
+    
+    const scaleX = maxWidth / rawViewport.width
+    const scaleY = maxHeight / rawViewport.height
+    const baseScale = Math.min(scaleX, scaleY)
+    const scale = Math.max(baseScale, 2)
+    
     const viewport = page.getViewport({ scale })
     const context = viewerCanvas.value.getContext('2d')
     
