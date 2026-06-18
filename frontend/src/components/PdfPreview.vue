@@ -21,7 +21,10 @@
       {{ totalPages }} 页
     </div>
     <div v-if="clickable" class="preview-overlay">
-      <el-icon><ZoomIn /></el-icon>
+      <div class="overlay-content">
+        <el-icon><View /></el-icon>
+        <span class="overlay-text">点击预览</span>
+      </div>
     </div>
   </div>
 </template>
@@ -119,7 +122,21 @@ const renderPage = async (pageNum) => {
 
   try {
     const page = await pdfDoc.getPage(pageNum)
-    const viewport = page.getViewport({ scale: props.scale })
+    const rawViewport = page.getViewport({ scale: 1 })
+    
+    const wrapperWidth = previewCanvas.value.parentElement.clientWidth
+    const wrapperHeight = previewCanvas.value.parentElement.clientHeight
+    
+    const padding = 8
+    const availableWidth = Math.max(wrapperWidth - padding * 2, 50)
+    const availableHeight = Math.max(wrapperHeight - padding * 2, 50)
+    
+    const scaleX = availableWidth / rawViewport.width
+    const scaleY = availableHeight / rawViewport.height
+    const adaptiveScale = Math.min(scaleX, scaleY)
+    
+    const finalScale = Math.max(adaptiveScale, props.scale * 0.5, 0.5)
+    const viewport = page.getViewport({ scale: finalScale })
     const context = previewCanvas.value.getContext('2d')
     
     previewCanvas.value.width = viewport.width
@@ -193,6 +210,7 @@ defineExpose({
   max-height: 100%;
   background: white;
   display: block;
+  object-fit: contain;
 }
 
 .preview-loading {
@@ -222,6 +240,7 @@ defineExpose({
   font-size: 10px;
   padding: 2px 6px;
   border-radius: 4px;
+  z-index: 2;
 }
 
 .preview-overlay {
@@ -230,13 +249,31 @@ defineExpose({
   left: 0;
   right: 0;
   bottom: 0;
-  background: rgba(102, 126, 234, 0.1);
+  background: rgba(102, 126, 234, 0.15);
   display: flex;
   align-items: center;
   justify-content: center;
   opacity: 0;
   transition: opacity 0.2s;
-  color: #667eea;
+  z-index: 3;
+}
+
+.overlay-content {
+  display: flex;
+  flex-direction: column;
+  align-items: center;
+  justify-content: center;
+  gap: 8px;
+  color: white;
+  background: rgba(102, 126, 234, 0.8);
+  padding: 10px 16px;
+  border-radius: 8px;
+  backdrop-filter: blur(4px);
+  font-size: 13px;
+  font-weight: 500;
+}
+
+.overlay-content .el-icon {
   font-size: 24px;
 }
 

@@ -548,11 +548,11 @@ const tiledWatermarkList = computed(() => {
     ? approxFontSize * 1.5
     : 60 * imageScale.value
   
-  const spacingX = isFullTiled ? approxWidth * 0.6 : approxWidth * 0.8
-  const spacingY = isFullTiled ? approxHeight * 1.2 : approxHeight * 1.5
+  const spacingX = isFullTiled ? approxWidth * 1.2 : approxWidth * 1.6
+  const spacingY = isFullTiled ? approxHeight * 2.0 : approxHeight * 2.5
   
-  const cols = Math.ceil(PREVIEW_BOX_WIDTH / spacingX) + 3
-  const rows = Math.ceil(PREVIEW_BOX_HEIGHT / spacingY) + 3
+  const cols = Math.ceil(PREVIEW_BOX_WIDTH / spacingX) + 4
+  const rows = Math.ceil(PREVIEW_BOX_HEIGHT / spacingY) + 4
   
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
@@ -561,8 +561,8 @@ const tiledWatermarkList = computed(() => {
         style: {
           ...baseStyle,
           position: 'absolute',
-          left: `${c * spacingX - approxWidth * (isFullTiled ? 1.5 : 1) + offsetX}px`,
-          top: `${r * spacingY - approxHeight}px`,
+          left: `${c * spacingX - approxWidth * (isFullTiled ? 2 : 1.5) + offsetX}px`,
+          top: `${r * spacingY - approxHeight * 1.5}px`,
           transform: `rotate(${rotateAngle}deg)`,
           transformOrigin: 'center center'
         }

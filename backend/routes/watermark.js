@@ -58,32 +58,32 @@ const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, 
       positions.push({ x: right, y: bottom });
       break;
     case 'tiled':
-      const spacingX = watermarkWidth * 0.8;
-      const spacingY = watermarkHeight * 1.5;
-      const cols = Math.ceil(pageWidth / spacingX) + 2;
-      const rows = Math.ceil(pageHeight / spacingY) + 2;
+      const spacingX = watermarkWidth * 1.6;
+      const spacingY = watermarkHeight * 2.5;
+      const cols = Math.ceil(pageWidth / spacingX) + 4;
+      const rows = Math.ceil(pageHeight / spacingY) + 4;
       for (let r = 0; r < rows; r++) {
         for (let c = 0; c < cols; c++) {
           const offsetX = r % 2 === 0 ? 0 : spacingX / 2;
           positions.push({
-            x: c * spacingX - watermarkWidth + offsetX,
-            y: r * spacingY - watermarkHeight,
+            x: c * spacingX - watermarkWidth * 1.5 + offsetX,
+            y: r * spacingY - watermarkHeight * 1.5,
             rotate: -30
           });
         }
       }
       break;
     case 'full-tiled':
-      const fullSpacingX = watermarkWidth * 0.6;
-      const fullSpacingY = watermarkHeight * 1.2;
-      const fullCols = Math.ceil(pageWidth / fullSpacingX) + 3;
-      const fullRows = Math.ceil(pageHeight / fullSpacingY) + 3;
+      const fullSpacingX = watermarkWidth * 1.2;
+      const fullSpacingY = watermarkHeight * 2.0;
+      const fullCols = Math.ceil(pageWidth / fullSpacingX) + 4;
+      const fullRows = Math.ceil(pageHeight / fullSpacingY) + 4;
       for (let r = 0; r < fullRows; r++) {
         for (let c = 0; c < fullCols; c++) {
           const offsetX = r % 2 === 0 ? 0 : fullSpacingX / 2;
           positions.push({
-            x: c * fullSpacingX - watermarkWidth * 1.5 + offsetX,
-            y: r * fullSpacingY - watermarkHeight,
+            x: c * fullSpacingX - watermarkWidth * 2 + offsetX,
+            y: r * fullSpacingY - watermarkHeight * 1.5,
             rotate: -45
           });
         }
