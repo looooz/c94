@@ -137,15 +137,15 @@ const renderPage = async (pageNum) => {
     const fitScale = Math.min(scaleW, scaleH)
     
     const dpr = window.devicePixelRatio || 1
-    const renderScale = Math.max(fitScale * dpr, dpr)
+    const renderScale = fitScale * dpr
     const viewport = page.getViewport({ scale: renderScale })
     const context = previewCanvas.value.getContext('2d')
     
     previewCanvas.value.width = Math.floor(viewport.width)
     previewCanvas.value.height = Math.floor(viewport.height)
     
-    previewCanvas.value.style.width = `${Math.floor(viewport.width / dpr)}px`
-    previewCanvas.value.style.height = `${Math.floor(viewport.height / dpr)}px`
+    previewCanvas.value.style.width = `${Math.floor(rawViewport.width * fitScale)}px`
+    previewCanvas.value.style.height = `${Math.floor(rawViewport.height * fitScale)}px`
     
     await page.render({
       canvasContext: context,

@@ -274,7 +274,7 @@
           </div>
           <div class="section-content">
             <div class="watermark-preview-wrapper">
-              <div class="preview-page" ref="previewPageRef">
+              <div class="preview-page" ref="previewPageRef" :style="previewPageStyle">
                 <div class="page-lines">
                   <div v-for="i in 8" :key="i" class="page-line"></div>
                 </div>
@@ -478,6 +478,8 @@ const watermarkImage = ref(null)
 const watermarkImagePreview = ref(null)
 const generatedWatermarkImage = ref(null)
 const imageScale = ref(0.5)
+const watermarkImageWidth = ref(100)
+const watermarkImageHeight = ref(60)
 const position = ref('center')
 const opacity = ref(0.3)
 const rotation = ref(0)
@@ -498,6 +500,9 @@ const previewModalVisible = ref(false)
 const previewModalSrc = ref(null)
 const previewModalTitle = ref('PDF预览')
 
+const pdfPageWidth = ref(595)
+const pdfPageHeight = ref(842)
+
 const PREVIEW_BOX_WIDTH = 500
 const PREVIEW_BOX_HEIGHT = 350
 
@@ -515,15 +520,78 @@ const isTiledPosition = computed(() => {
   return position.value === 'tiled' || position.value === 'full-tiled'
 })
 
-const getWatermarkBaseStyle = () => {
-  const baseFontSize = watermarkType.value === 'text' ? Math.max(fontSize.value / 3, 14) : undefined
+const previewPageStyle = computed(() => {
+  const pageW = pdfPageWidth.value
+  const pageH = pdfPageHeight.value
+  const maxWidth = PREVIEW_BOX_WIDTH
+  const maxHeight = PREVIEW_BOX_HEIGHT
+  
+  const scaleW = maxWidth / pageW
+  const scaleH = maxHeight / pageH
+  const fitScale = Math.min(scaleW, scaleH)
+  
   return {
-    opacity: opacity.value,
-    color: watermarkType.value === 'text' ? fontColor.value : undefined,
-    fontSize: baseFontSize ? `${baseFontSize}px` : undefined,
-    fontFamily: fontFamily.value,
-    fontWeight: fontFamily.value.includes('Bold') ? 'bold' : 'normal',
-    whiteSpace: 'nowrap'
+    width: `${Math.floor(pageW * fitScale)}px`,
+    height: `${Math.floor(pageH * fitScale)}px`
+  }
+})
+
+const previewScale = computed(() => {
+  const pageW = pdfPageWidth.value
+  const pageH = pdfPageHeight.value
+  const maxWidth = PREVIEW_BOX_WIDTH
+  const maxHeight = PREVIEW_BOX_HEIGHT
+  
+  const scaleW = maxWidth / pageW
+  const scaleH = maxHeight / pageH
+  return Math.min(scaleW, scaleH)
+})
+
+const getWatermarkActualSize = () => {
+  const text = watermarkText.value || '水印文字'
+  
+  if (watermarkType.value === 'text' && !hasChinese.value) {
+    const fontSizeNum = fontSize.value
+    const avgCharWidth = fontSizeNum * 0.55
+    const width = Math.max(text.length * avgCharWidth, 40)
+    const height = fontSizeNum
+    return { width, height, fontSize: fontSizeNum }
+  } else {
+    const scale = imageScale.value
+    const width = watermarkImageWidth.value * scale
+    const height = watermarkImageHeight.value * scale
+    return { width, height, fontSize: 0 }
+  }
+}
+
+const getWatermarkBaseStyle = () => {
+  const scale = previewScale.value
+  const actualSize = getWatermarkActualSize()
+  
+  if (watermarkType.value === 'text') {
+    const previewFontSize = Math.max(actualSize.fontSize * scale, 10)
+    return {
+      opacity: opacity.value,
+      color: fontColor.value,
+      fontSize: `${previewFontSize}px`,
+      fontFamily: fontFamily.value,
+      fontWeight: fontFamily.value.includes('Bold') ? 'bold' : 'normal',
+      whiteSpace: 'nowrap',
+      lineHeight: 1.2
+    }
+  } else {
+    return {
+      opacity: opacity.value
+    }
+  }
+}
+
+const getWatermarkPreviewSize = () => {
+  const scale = previewScale.value
+  const actualSize = getWatermarkActualSize()
+  return {
+    width: actualSize.width * scale,
+    height: actualSize.height * scale
   }
 }
 
@@ -532,20 +600,30 @@ const previewStyle = computed(() => {
     return {}
   }
   const baseStyle = getWatermarkBaseStyle()
+  const scale = previewScale.value
+  const wmSize = getWatermarkPreviewSize()
+  const margin = 30 * scale
   
   const positions = {
-    'top-left': { top: '20px', left: '20px' },
-    'top-center': { top: '20px', left: '50%', transform: `translateX(-50%) rotate(${rotation.value}deg)` },
-    'top-right': { top: '20px', right: '20px' },
-    'center-left': { top: '50%', left: '20px', transform: `translateY(-50%) rotate(${rotation.value}deg)` },
+    'top-left': { top: `${margin}px`, left: `${margin}px` },
+    'top-center': { top: `${margin}px`, left: '50%', transform: `translateX(-50%) rotate(${rotation.value}deg)` },
+    'top-right': { top: `${margin}px`, right: `${margin}px` },
+    'center-left': { top: '50%', left: `${margin}px`, transform: `translateY(-50%) rotate(${rotation.value}deg)` },
     'center': { top: '50%', left: '50%', transform: `translate(-50%, -50%) rotate(${rotation.value}deg)` },
-    'center-right': { top: '50%', right: '20px', transform: `translateY(-50%) rotate(${rotation.value}deg)` },
-    'bottom-left': { bottom: '20px', left: '20px' },
-    'bottom-center': { bottom: '20px', left: '50%', transform: `translateX(-50%) rotate(${rotation.value}deg)` },
-    'bottom-right': { bottom: '20px', right: '20px' }
+    'center-right': { top: '50%', right: `${margin}px`, transform: `translateY(-50%) rotate(${rotation.value}deg)` },
+    'bottom-left': { bottom: `${margin}px`, left: `${margin}px` },
+    'bottom-center': { bottom: `${margin}px`, left: '50%', transform: `translateX(-50%) rotate(${rotation.value}deg)` },
+    'bottom-right': { bottom: `${margin}px`, right: `${margin}px` }
   }
   
-  return { ...baseStyle, ...positions[position.value], position: 'absolute' }
+  const result = { ...baseStyle, ...positions[position.value], position: 'absolute' }
+  
+  if (watermarkType.value === 'image' || hasChinese.value) {
+    result.width = `${wmSize.width}px`
+    result.height = `${wmSize.height}px`
+  }
+  
+  return result
 })
 
 const tiledWatermarkList = computed(() => {
@@ -556,56 +634,65 @@ const tiledWatermarkList = computed(() => {
   const isFullTiled = position.value === 'full-tiled'
   const rotateAngle = isFullTiled ? -45 : -30
   
-  const text = watermarkText.value || '水印文字'
-  const approxFontSize = watermarkType.value === 'text' ? Math.max(fontSize.value / 3, 14) : 50
-  const charWidth = approxFontSize * 0.6
-  const approxWidth = watermarkType.value === 'text' 
-    ? Math.max(text.length * charWidth, 80)
-    : 100 * imageScale.value
-  const approxHeight = watermarkType.value === 'text'
-    ? approxFontSize * 1.5
-    : 60 * imageScale.value
+  const scale = previewScale.value
+  const actualSize = getWatermarkActualSize()
+  const wmWidth = actualSize.width
+  const wmHeight = actualSize.height
   
   const spacingMulX = watermarkSpacingX.value
   const spacingMulY = watermarkSpacingY.value
-  const baseSpacingX = isFullTiled ? approxWidth * 1.2 : approxWidth * 1.6
-  const baseSpacingY = isFullTiled ? approxHeight * 2.0 : approxHeight * 2.5
-  const spacingX = baseSpacingX * spacingMulX
-  const spacingY = baseSpacingY * spacingMulY
+  const baseSpacingX = isFullTiled ? wmWidth * 1.2 : wmWidth * 1.6
+  const baseSpacingY = isFullTiled ? wmHeight * 2.0 : wmHeight * 2.5
+  const spacingX = baseSpacingX * spacingMulX * scale
+  const spacingY = baseSpacingY * spacingMulY * scale
   
-  const cols = Math.ceil(PREVIEW_BOX_WIDTH / spacingX) + 4
-  const rows = Math.ceil(PREVIEW_BOX_HEIGHT / spacingY) + 4
+  const previewW = pdfPageWidth.value * scale
+  const previewH = pdfPageHeight.value * scale
+  
+  const cols = Math.ceil(previewW / spacingX) + 4
+  const rows = Math.ceil(previewH / spacingY) + 4
+  
+  const offsetStartX = isFullTiled ? wmWidth * 2 * scale : wmWidth * 1.5 * scale
+  const offsetStartY = wmHeight * 1.5 * scale
   
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
       const offsetX = r % 2 === 0 ? 0 : spacingX / 2
-      result.push({
-        style: {
-          ...baseStyle,
-          position: 'absolute',
-          left: `${c * spacingX - approxWidth * (isFullTiled ? 2 : 1.5) + offsetX}px`,
-          top: `${r * spacingY - approxHeight * 1.5}px`,
-          transform: `rotate(${rotateAngle}deg)`,
-          transformOrigin: 'center center'
-        }
-      })
+      const style = {
+        ...baseStyle,
+        position: 'absolute',
+        left: `${c * spacingX - offsetStartX + offsetX}px`,
+        top: `${r * spacingY - offsetStartY}px`,
+        transform: `rotate(${rotateAngle}deg)`,
+        transformOrigin: 'center center'
+      }
+      
+      if (watermarkType.value === 'image' || hasChinese.value) {
+        style.width = `${wmWidth * scale}px`
+        style.height = `${wmHeight * scale}px`
+      }
+      
+      result.push({ style })
     }
   }
   
   return result
 })
 
-const computeFitScale = (page, containerWidth) => {
+const computeFitScale = (page, containerWidth, containerHeight) => {
   const viewport = page.getViewport({ scale: 1 })
   const padding = 48
   const availW = Math.max(containerWidth - padding, 50)
-  return availW / viewport.width
+  const availH = Math.max((containerHeight || 600) - padding, 50)
+  const scaleW = availW / viewport.width
+  const scaleH = availH / viewport.height
+  return Math.min(scaleW, scaleH)
 }
 
-const computeRenderScale = (page, containerWidth) => {
-  const fitScale = computeFitScale(page, containerWidth)
+const computeRenderScale = (page, containerWidth, containerHeight) => {
+  const fitScale = computeFitScale(page, containerWidth, containerHeight)
   const dpr = window.devicePixelRatio || 1
-  return Math.max(fitScale * dpr, dpr * 1.5)
+  return fitScale * dpr
 }
 
 const generateWatermarkImage = () => {
@@ -636,6 +723,9 @@ const generateWatermarkImage = () => {
   ctx.fillText(watermarkText.value, canvas.width / 2, canvas.height / 2)
   
   const dataUrl = canvas.toDataURL('image/png')
+  
+  watermarkImageWidth.value = canvas.width
+  watermarkImageHeight.value = canvas.height
   
   fetch(dataUrl)
     .then(res => res.blob())
@@ -708,6 +798,11 @@ const loadPdfForPreview = async (pdfFile) => {
     totalPages.value = pdfDoc.value.numPages
     currentPage.value = 1
     comparePage.value = 1
+
+    const firstPage = await pdfDoc.value.getPage(1)
+    const viewport = firstPage.getViewport({ scale: 1 })
+    pdfPageWidth.value = viewport.width
+    pdfPageHeight.value = viewport.height
 
     await nextTick()
     const ready = await waitForCanvasReady(beforePreviewCanvas)
@@ -783,23 +878,23 @@ const renderPreviewPage = async (type, pageNum) => {
   try {
     const page = await doc.getPage(pageNum)
     const container = canvas.parentElement
-    const containerWidth = container?.clientWidth || 800
+    const containerWidth = container?.clientWidth || 400
+    const containerHeight = container?.clientHeight || 500
 
-    const fitScale = computeFitScale(page, containerWidth)
-    const renderScale = computeRenderScale(page, containerWidth)
+    const rawViewport = page.getViewport({ scale: 1 })
+    const fitScale = computeFitScale(page, containerWidth, containerHeight)
+    const renderScale = computeRenderScale(page, containerWidth, containerHeight)
     const viewport = page.getViewport({ scale: renderScale })
     const context = canvas.getContext('2d')
 
     canvas.width = Math.floor(viewport.width)
     canvas.height = Math.floor(viewport.height)
 
-    const rawViewport = page.getViewport({ scale: 1 })
     const cssWidth = Math.floor(rawViewport.width * fitScale)
     const cssHeight = Math.floor(rawViewport.height * fitScale)
     canvas.style.width = `${cssWidth}px`
     canvas.style.height = `${cssHeight}px`
     canvas.style.display = 'block'
-    canvas.style.maxWidth = 'none'
 
     context.clearRect(0, 0, canvas.width, canvas.height)
     context.fillStyle = '#ffffff'
@@ -826,6 +921,12 @@ const handleWatermarkImageSelect = (uploadFile) => {
   const reader = new FileReader()
   reader.onload = (e) => {
     watermarkImagePreview.value = e.target.result
+    const img = new Image()
+    img.onload = () => {
+      watermarkImageWidth.value = img.width
+      watermarkImageHeight.value = img.height
+    }
+    img.src = e.target.result
   }
   reader.readAsDataURL(uploadFile.raw)
 }
@@ -1156,18 +1257,19 @@ const openPreviewModal = (src, title) => {
 .watermark-preview-wrapper {
   display: flex;
   justify-content: center;
+  align-items: center;
+  min-height: 350px;
+  padding: 20px;
 }
 
 .preview-page {
-  width: 500px;
-  height: 350px;
   background: white;
   border: 1px solid #e4e7ed;
   border-radius: 4px;
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
   position: relative;
-  padding: 30px;
   overflow: hidden;
+  box-sizing: border-box;
 }
 
 .page-lines {
@@ -1175,6 +1277,8 @@ const openPreviewModal = (src, title) => {
   flex-direction: column;
   gap: 18px;
   height: 100%;
+  padding: 30px;
+  box-sizing: border-box;
 }
 
 .page-line {
@@ -1199,9 +1303,10 @@ const openPreviewModal = (src, title) => {
 }
 
 .watermark-img {
-  max-width: 150px;
-  max-height: 100px;
+  width: 100%;
+  height: 100%;
   object-fit: contain;
+  display: block;
 }
 
 .watermark-placeholder {
@@ -1278,8 +1383,6 @@ const openPreviewModal = (src, title) => {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   background: white;
   max-width: 100%;
-  width: auto !important;
-  height: auto !important;
   display: block;
   border-radius: 4px;
   flex-shrink: 0;

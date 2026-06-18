@@ -378,40 +378,78 @@ const loadAfterPdfForPreview = async (downloadUrl) => {
   }
 }
 
+const computeFitScale = (page, containerWidth, containerHeight) => {
+  const viewport = page.getViewport({ scale: 1 })
+  const padding = 40
+  const availW = Math.max(containerWidth - padding, 50)
+  const availH = Math.max((containerHeight || 500) - padding, 50)
+  const scaleW = availW / viewport.width
+  const scaleH = availH / viewport.height
+  return Math.min(scaleW, scaleH)
+}
+
 const renderPreviewPage = async (type, pageNum) => {
-  const canvas = type === 'before' ? beforePreviewCanvas.value : beforeCompareCanvas.value
-  if (!canvas || !pdfDoc.value) return
-  
-  const page = await pdfDoc.value.getPage(pageNum)
-  const viewport = page.getViewport({ scale: 1.5 })
-  const context = canvas.getContext('2d')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  
-  await page.render({
-    canvasContext: context,
-    viewport: viewport
-  }).promise
+  let canvas = null
+  let doc = null
+
+  if (type === 'before') {
+    canvas = beforePreviewCanvas.value
+    doc = pdfDoc.value
+  } else if (type === 'before-compare') {
+    canvas = beforeCompareCanvas.value
+    doc = pdfDoc.value
+  } else if (type === 'after') {
+    canvas = afterPreviewCanvas.value
+    doc = afterPdfDoc.value
+  }
+
+  if (!canvas || !doc) {
+    console.warn(`[renderPreviewPage] type=${type} canvas or doc missing`, { hasCanvas: !!canvas, hasDoc: !!doc })
+    return
+  }
+
+  if (pageNum < 1 || pageNum > doc.numPages) return
+
+  try {
+    const page = await doc.getPage(pageNum)
+    const container = canvas.parentElement
+    const containerWidth = container?.clientWidth || 400
+    const containerHeight = container?.clientHeight || 500
+
+    const rawViewport = page.getViewport({ scale: 1 })
+    const fitScale = computeFitScale(page, containerWidth, containerHeight)
+    const dpr = window.devicePixelRatio || 1
+    const renderScale = fitScale * dpr
+    const viewport = page.getViewport({ scale: renderScale })
+    const context = canvas.getContext('2d')
+
+    canvas.width = Math.floor(viewport.width)
+    canvas.height = Math.floor(viewport.height)
+
+    const cssWidth = Math.floor(rawViewport.width * fitScale)
+    const cssHeight = Math.floor(rawViewport.height * fitScale)
+    canvas.style.width = `${cssWidth}px`
+    canvas.style.height = `${cssHeight}px`
+    canvas.style.display = 'block'
+
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
+
+    await page.render({
+      canvasContext: context,
+      viewport: viewport
+    }).promise
+  } catch (err) {
+    if (err?.name !== 'RenderingCancelledException') {
+      console.error(`[renderPreviewPage] Failed type=${type} page=${pageNum}:`, err)
+    }
+  }
 }
 
 const renderComparePages = async (pageNum) => {
   await renderPreviewPage('before-compare', pageNum)
-  
-  const canvas = afterPreviewCanvas.value
-  if (!canvas || !afterPdfDoc.value) return
-  
-  if (pageNum < 1 || pageNum > afterPdfDoc.value.numPages) return
-  
-  const page = await afterPdfDoc.value.getPage(pageNum)
-  const viewport = page.getViewport({ scale: 1.5 })
-  const context = canvas.getContext('2d')
-  canvas.width = viewport.width
-  canvas.height = viewport.height
-  
-  await page.render({
-    canvasContext: context,
-    viewport: viewport
-  }).promise
+  await renderPreviewPage('after', pageNum)
 }
 
 const removeFile = () => {

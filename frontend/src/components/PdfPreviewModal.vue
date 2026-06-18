@@ -229,7 +229,7 @@ const renderPage = async (pageNum) => {
     const fitScale = Math.min(scaleW, scaleH)
 
     const dpr = window.devicePixelRatio || 1
-    const renderScale = Math.max(fitScale * dpr, dpr * 1.5)
+    const renderScale = fitScale * dpr
     
     const viewport = page.getViewport({ scale: renderScale })
     const context = viewerCanvas.value.getContext('2d')
@@ -237,8 +237,8 @@ const renderPage = async (pageNum) => {
     viewerCanvas.value.width = Math.floor(viewport.width)
     viewerCanvas.value.height = Math.floor(viewport.height)
 
-    viewerCanvas.value.style.width = 'auto'
-    viewerCanvas.value.style.height = 'auto'
+    viewerCanvas.value.style.width = `${Math.floor(rawViewport.width * fitScale)}px`
+    viewerCanvas.value.style.height = `${Math.floor(rawViewport.height * fitScale)}px`
     viewerCanvas.value.style.display = 'block'
     
     context.clearRect(0, 0, viewport.width, viewport.height)
