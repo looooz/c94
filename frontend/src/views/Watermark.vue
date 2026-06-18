@@ -245,6 +245,14 @@
                 <el-option label="-45°" :value="-45" />
               </el-select>
             </div>
+
+            <div class="setting-row" v-if="isTiledPosition">
+              <span class="setting-label">水印间距</span>
+              <div class="setting-control-inline">
+                <el-slider v-model="watermarkSpacing" :min="0.5" :max="3.0" :step="0.1" class="control-slider" />
+                <el-tag type="info" effect="plain" class="scale-tag">{{ watermarkSpacing.toFixed(1) }}x</el-tag>
+              </div>
+            </div>
           </div>
         </div>
 
@@ -465,6 +473,7 @@ const imageScale = ref(0.5)
 const position = ref('center')
 const opacity = ref(0.3)
 const rotation = ref(0)
+const watermarkSpacing = ref(1.0)
 
 const beforePreviewCanvas = ref(null)
 const beforeCompareCanvas = ref(null)
@@ -548,8 +557,11 @@ const tiledWatermarkList = computed(() => {
     ? approxFontSize * 1.5
     : 60 * imageScale.value
   
-  const spacingX = isFullTiled ? approxWidth * 1.2 : approxWidth * 1.6
-  const spacingY = isFullTiled ? approxHeight * 2.0 : approxHeight * 2.5
+  const spacingMul = watermarkSpacing.value
+  const baseSpacingX = isFullTiled ? approxWidth * 1.2 : approxWidth * 1.6
+  const baseSpacingY = isFullTiled ? approxHeight * 2.0 : approxHeight * 2.5
+  const spacingX = baseSpacingX * spacingMul
+  const spacingY = baseSpacingY * spacingMul
   
   const cols = Math.ceil(PREVIEW_BOX_WIDTH / spacingX) + 4
   const rows = Math.ceil(PREVIEW_BOX_HEIGHT / spacingY) + 4
@@ -573,23 +585,16 @@ const tiledWatermarkList = computed(() => {
   return result
 })
 
-const computeAdaptiveScale = (page, targetMaxWidth = 900, targetMaxHeight = 1200) => {
+const computeAdaptiveScale = (page, containerWidth, containerHeight, minScale = 2.0) => {
   const viewport = page.getViewport({ scale: 1 })
-  const isLandscape = viewport.width > viewport.height
-  
-  let maxWidth = targetMaxWidth
-  let maxHeight = targetMaxHeight
-  
-  if (isLandscape) {
-    maxWidth = targetMaxHeight
-    maxHeight = targetMaxWidth
-  }
-  
-  const scaleX = maxWidth / viewport.width
-  const scaleY = maxHeight / viewport.height
-  const baseScale = Math.min(scaleX, scaleY)
-  
-  return Math.max(baseScale, 1.5)
+  const padding = 48
+  const availableW = Math.max(containerWidth - padding, 50)
+  const availableH = Math.max(containerHeight - padding, 50)
+  const scaleX = availableW / viewport.width
+  const scaleY = availableH / viewport.height
+  const fitScale = Math.min(scaleX, scaleY)
+  const dpr = window.devicePixelRatio || 1
+  return Math.max(fitScale, minScale, dpr)
 }
 
 const generateWatermarkImage = () => {
@@ -705,15 +710,29 @@ const loadAfterPdfForPreview = async (downloadUrl) => {
       cMapPacked: true
     }).promise
     comparePage.value = 1
+
     await nextTick()
-    
+
     let attempts = 0
-    while ((!beforeCompareCanvas.value || !afterPreviewCanvas.value) && attempts < 10) {
+    const MAX_ATTEMPTS = 20
+    while (attempts < MAX_ATTEMPTS) {
+      const hasBefore = beforeCompareCanvas.value
+      const hasAfter = afterPreviewCanvas.value
+      const beforeContainerReady = hasBefore?.parentElement?.clientWidth > 0 && hasBefore?.parentElement?.clientHeight > 0
+      const afterContainerReady = hasAfter?.parentElement?.clientWidth > 0 && hasAfter?.parentElement?.clientHeight > 0
+      if (hasBefore && hasAfter && beforeContainerReady && afterContainerReady) break
       await nextTick()
-      await new Promise(resolve => setTimeout(resolve, 50))
+      await new Promise(resolve => setTimeout(resolve, 80))
       attempts++
     }
-    
+
+    if (attempts >= MAX_ATTEMPTS) {
+      console.warn('[loadAfterPdfForPreview] Max DOM wait attempts reached, proceeding anyway')
+    }
+
+    await nextTick()
+    await new Promise(resolve => setTimeout(resolve, 100))
+
     await renderComparePages(1)
   } catch (error) {
     console.error('Failed to load processed PDF for preview:', error)
@@ -723,59 +742,52 @@ const loadAfterPdfForPreview = async (downloadUrl) => {
 const renderPreviewPage = async (type, pageNum) => {
   let canvas = null
   let doc = null
-  
+
   if (type === 'before') {
     canvas = beforePreviewCanvas.value
     doc = pdfDoc.value
   } else if (type === 'before-compare') {
     canvas = beforeCompareCanvas.value
     doc = pdfDoc.value
+  } else if (type === 'after') {
+    canvas = afterPreviewCanvas.value
+    doc = afterPdfDoc.value
   }
-  
-  if (!canvas || !doc) return
-  
+
+  if (!canvas || !doc) {
+    console.warn(`[renderPreviewPage] type=${type} canvas or doc missing`, { hasCanvas: !!canvas, hasDoc: !!doc })
+    return
+  }
+
   try {
     const page = await doc.getPage(pageNum)
-    const scale = computeAdaptiveScale(page)
+    const container = canvas.parentElement
+    const containerWidth = container?.clientWidth || 800
+    const containerHeight = container?.clientHeight || 600
+    const scale = computeAdaptiveScale(page, containerWidth, containerHeight)
     const viewport = page.getViewport({ scale })
     const context = canvas.getContext('2d')
-    canvas.width = viewport.width
-    canvas.height = viewport.height
-    
+    canvas.width = Math.floor(viewport.width)
+    canvas.height = Math.floor(viewport.height)
+    canvas.style.width = 'auto'
+    canvas.style.height = 'auto'
+    context.clearRect(0, 0, canvas.width, canvas.height)
+    context.fillStyle = '#ffffff'
+    context.fillRect(0, 0, canvas.width, canvas.height)
     await page.render({
       canvasContext: context,
       viewport: viewport
     }).promise
   } catch (err) {
     if (err?.name !== 'RenderingCancelledException') {
-      console.error('Failed to render preview page:', err)
+      console.error(`[renderPreviewPage] Failed type=${type} page=${pageNum}:`, err)
     }
   }
 }
 
 const renderComparePages = async (pageNum) => {
   await renderPreviewPage('before-compare', pageNum)
-  
-  const canvas = afterPreviewCanvas.value
-  if (!canvas || !afterPdfDoc.value) return
-  
-  try {
-    const page = await afterPdfDoc.value.getPage(pageNum)
-    const scale = computeAdaptiveScale(page)
-    const viewport = page.getViewport({ scale })
-    const context = canvas.getContext('2d')
-    canvas.width = viewport.width
-    canvas.height = viewport.height
-    
-    await page.render({
-      canvasContext: context,
-      viewport: viewport
-    }).promise
-  } catch (err) {
-    if (err?.name !== 'RenderingCancelledException') {
-      console.error('Failed to render compare page:', err)
-    }
-  }
+  await renderPreviewPage('after', pageNum)
 }
 
 const handleWatermarkImageSelect = (uploadFile) => {
@@ -824,7 +836,8 @@ const addWatermark = async () => {
     opacity: opacity.value,
     position: position.value,
     rotation: rotation.value,
-    imageScale: hasChinese.value ? 1.0 : imageScale.value
+    imageScale: hasChinese.value ? 1.0 : imageScale.value,
+    watermarkSpacing: watermarkSpacing.value
   }
 
   loading.value = true
@@ -1221,18 +1234,24 @@ const openPreviewModal = (src, title) => {
   border: 1px solid #e4e7ed;
   border-radius: 12px;
   overflow: auto;
-  max-height: 500px;
+  max-height: 560px;
+  min-height: 420px;
   display: flex;
   justify-content: center;
   align-items: flex-start;
   padding: 24px;
+  box-sizing: border-box;
 }
 
 .preview-canvas {
   box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
   background: white;
   max-width: 100%;
+  width: auto !important;
+  height: auto !important;
+  display: block;
   border-radius: 4px;
+  flex-shrink: 0;
 }
 
 .page-navigation {

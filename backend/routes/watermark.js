@@ -20,7 +20,7 @@ const parseColor = (colorStr) => {
   return { r: 0, g: 0, b: 0 };
 };
 
-const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, watermarkHeight, margin = 30) => {
+const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, watermarkHeight, margin = 30, spacingMultiplier = 1.0) => {
   const positions = [];
   const centerX = (pageWidth - watermarkWidth) / 2;
   const centerY = (pageHeight - watermarkHeight) / 2;
@@ -57,9 +57,11 @@ const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, 
     case 'bottom-right':
       positions.push({ x: right, y: bottom });
       break;
-    case 'tiled':
-      const spacingX = watermarkWidth * 1.6;
-      const spacingY = watermarkHeight * 2.5;
+    case 'tiled': {
+      const baseSpacingX = watermarkWidth * 1.6;
+      const baseSpacingY = watermarkHeight * 2.5;
+      const spacingX = baseSpacingX * spacingMultiplier;
+      const spacingY = baseSpacingY * spacingMultiplier;
       const cols = Math.ceil(pageWidth / spacingX) + 4;
       const rows = Math.ceil(pageHeight / spacingY) + 4;
       for (let r = 0; r < rows; r++) {
@@ -73,9 +75,12 @@ const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, 
         }
       }
       break;
-    case 'full-tiled':
-      const fullSpacingX = watermarkWidth * 1.2;
-      const fullSpacingY = watermarkHeight * 2.0;
+    }
+    case 'full-tiled': {
+      const baseFullSpacingX = watermarkWidth * 1.2;
+      const baseFullSpacingY = watermarkHeight * 2.0;
+      const fullSpacingX = baseFullSpacingX * spacingMultiplier;
+      const fullSpacingY = baseFullSpacingY * spacingMultiplier;
       const fullCols = Math.ceil(pageWidth / fullSpacingX) + 4;
       const fullRows = Math.ceil(pageHeight / fullSpacingY) + 4;
       for (let r = 0; r < fullRows; r++) {
@@ -89,6 +94,7 @@ const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, 
         }
       }
       break;
+    }
     default:
       positions.push({ x: centerX, y: centerY });
   }
@@ -113,7 +119,8 @@ router.post('/', upload.fields([{ name: 'pdf', maxCount: 1 }, { name: 'watermark
       position = 'center',
       rotation = 0,
       fontFamily = 'Helvetica',
-      imageScale = 0.5
+      imageScale = 0.5,
+      watermarkSpacing = 1.0
     } = req.body;
 
     const pdfBytes = fs.readFileSync(pdfFile.path);
@@ -193,7 +200,7 @@ router.post('/', upload.fields([{ name: 'pdf', maxCount: 1 }, { name: 'watermark
       const { width: pageWidth, height: pageHeight } = page.getSize();
 
       if (type === 'text' && !hasChinese && watermarkFont) {
-        const positions = getWatermarkPositions(pageWidth, pageHeight, position, textWidth, textHeight);
+        const positions = getWatermarkPositions(pageWidth, pageHeight, position, textWidth, textHeight, 30, parseFloat(watermarkSpacing) || 1.0);
 
         for (const pos of positions) {
           const rotateAngle = pos.rotate !== undefined ? pos.rotate : rotationNum;
@@ -208,7 +215,7 @@ router.post('/', upload.fields([{ name: 'pdf', maxCount: 1 }, { name: 'watermark
           });
         }
       } else if (useImageMode && embeddedWatermarkImage) {
-        const positions = getWatermarkPositions(pageWidth, pageHeight, position, watermarkImgWidth, watermarkImgHeight);
+        const positions = getWatermarkPositions(pageWidth, pageHeight, position, watermarkImgWidth, watermarkImgHeight, 30, parseFloat(watermarkSpacing) || 1.0);
 
         for (const pos of positions) {
           const rotateAngle = pos.rotate !== undefined ? pos.rotate : rotationNum;
