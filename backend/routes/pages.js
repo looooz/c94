@@ -74,7 +74,12 @@ const processSinglePDF = async (file, operation, options) => {
     resultInfo = { pagesExtracted: validPages.length };
   } else if (operation === 'reorder') {
     const { newOrder } = options;
-    const newOrderArr = JSON.parse(newOrder).map(p => parseInt(p) - 1);
+    let newOrderArr;
+    try {
+      newOrderArr = JSON.parse(newOrder).map(p => parseInt(p) - 1);
+    } catch (e) {
+      newOrderArr = newOrder.split(',').map(s => parseInt(s.trim()) - 1).filter(n => !isNaN(n));
+    }
     const validOrder = newOrderArr.filter(p => p >= 0 && p < totalPages);
     
     if (validOrder.length !== totalPages) {

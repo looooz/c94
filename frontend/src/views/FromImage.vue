@@ -383,7 +383,7 @@ const convertToPDF = async () => {
   }
 
   if (processingMode.value === 'merge') {
-    options.order = files.value.map((_, idx) => idx)
+    options.order = JSON.stringify(files.value.map((_, idx) => idx))
   }
 
   if (pageSize.value === 'custom') {

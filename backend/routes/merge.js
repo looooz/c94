@@ -15,10 +15,17 @@ router.post('/', upload.array('files', 20), async (req, res) => {
       return res.status(400).json({ error: 'Please upload at least 2 PDF files' });
     }
 
-    const order = req.body.order ? JSON.parse(req.body.order) : null;
+    let order = null;
+    if (req.body.order) {
+      try {
+        order = JSON.parse(req.body.order);
+      } catch (e) {
+        order = req.body.order.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      }
+    }
     let files = req.files;
     
-    if (order && order.length === files.length) {
+    if (Array.isArray(order) && order.length === files.length) {
       files = order.map(idx => files[idx]).filter(Boolean);
     }
 

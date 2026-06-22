@@ -296,8 +296,13 @@ router.post('/', upload.array('images', 50), async (req, res) => {
 
     let files = req.files;
     if (order) {
-      const orderArr = JSON.parse(order);
-      if (orderArr.length === files.length) {
+      let orderArr;
+      try {
+        orderArr = JSON.parse(order);
+      } catch (e) {
+        orderArr = order.split(',').map(s => parseInt(s.trim())).filter(n => !isNaN(n));
+      }
+      if (Array.isArray(orderArr) && orderArr.length === files.length) {
         files = orderArr.map(idx => files[idx]).filter(Boolean);
       }
     }
