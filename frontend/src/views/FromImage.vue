@@ -7,7 +7,7 @@
 
     <div class="page-header">
       <h1>图片转PDF</h1>
-      <p>将多张图片合并为一个PDF文件</p>
+      <p>将图片转换为PDF，支持合并为单个PDF或批量生成独立PDF</p>
     </div>
 
     <div class="tool-card">
@@ -21,7 +21,7 @@
       >
         <el-icon :size="48" color="#667eea"><UploadFilled /></el-icon>
         <p style="font-size: 18px; margin-top: 16px; color: #333;">
-          拖拽图片文件到此处，或点击选择文件
+          拖拽图片文件到此处，或点击选择文件（支持批量）
         </p>
         <p style="font-size: 14px; color: #999; margin-top: 8px;">
           支持JPG、PNG格式，最多50张图片
@@ -37,6 +37,13 @@
       </div>
 
       <div v-if="files.length > 0" class="file-list" ref="fileListRef">
+        <div class="file-list-header">
+          <span style="font-weight: 500; color: #666;">已选择 {{ files.length }} 个图片</span>
+          <el-button type="danger" text size="small" @click="clearAllFiles">
+            <el-icon><Delete /></el-icon>
+            全部清除
+          </el-button>
+        </div>
         <div 
           v-for="(file, index) in files" 
           :key="index" 
@@ -44,7 +51,7 @@
           :data-id="index"
         >
           <div style="display: flex; align-items: center; gap: 12px;">
-            <span class="drag-handle">
+            <span v-if="processingMode === 'merge'" class="drag-handle">
               <el-icon><Rank /></el-icon>
             </span>
             <div 
@@ -72,6 +79,34 @@
 
       <div v-if="files.length > 0">
         <div class="setting-row">
+          <span class="setting-label">处理模式：</span>
+          <el-radio-group v-model="processingMode">
+            <el-radio-button value="merge">
+              <el-icon><Fold /></el-icon>
+              合并为一个PDF
+            </el-radio-button>
+            <el-radio-button value="batch">
+              <el-icon><Files /></el-icon>
+              批量生成独立PDF
+            </el-radio-button>
+          </el-radio-group>
+        </div>
+
+        <div v-if="processingMode === 'merge'" style="margin-top: 8px; padding: 12px 16px; background: #f0f5ff; border-radius: 8px; border: 1px solid #d6e4ff;">
+          <p style="color: #667eea; font-size: 13px; margin: 0;">
+            <el-icon style="vertical-align: middle; margin-right: 4px;"><InfoFilled /></el-icon>
+            合并模式：所有图片将按顺序合并为一个PDF文件，每张图片占一页
+          </p>
+        </div>
+
+        <div v-if="processingMode === 'batch'" style="margin-top: 8px; padding: 12px 16px; background: #f0f5ff; border-radius: 8px; border: 1px solid #d6e4ff;">
+          <p style="color: #667eea; font-size: 13px; margin: 0;">
+            <el-icon style="vertical-align: middle; margin-right: 4px;"><InfoFilled /></el-icon>
+            批量模式：每张图片将独立生成一个PDF文件，最终打包为ZIP下载
+          </p>
+        </div>
+
+        <div class="setting-row" style="margin-top: 16px;">
           <span class="setting-label">页面尺寸：</span>
           <el-select v-model="pageSize" style="width: 150px;">
             <el-option label="A4" value="A4" />
@@ -107,7 +142,7 @@
         <div style="text-align: center; margin-top: 24px;">
           <button class="action-button" @click="convertToPDF" :disabled="loading">
             <el-icon style="margin-right: 8px;"><Document /></el-icon>
-            转换为PDF
+            {{ processingMode === 'merge' ? '合并为PDF' : `批量转换PDF（${files.length}个文件）` }}
           </button>
         </div>
       </div>
@@ -117,39 +152,74 @@
           <el-icon style="margin-right: 8px;"><CircleCheckFilled /></el-icon>
           转换成功！
         </h3>
-        <p style="margin-bottom: 12px;">
-          共 <strong>{{ result.pageCount }}</strong> 页
-        </p>
-        <p style="margin-bottom: 16px;">
-          文件大小：{{ formatFileSize(result.fileSize) }}
-        </p>
 
-        <div class="result-preview-section">
-          <h4 style="margin-bottom: 12px; color: #333;">
-            <el-icon style="margin-right: 8px;"><View /></el-icon>
-            转换结果预览
-          </h4>
-          <div class="result-preview-wrapper">
-            <PdfPreview 
-              :src="result.downloadUrl" 
-              width="150px" 
-              height="200px" 
-              :scale="1.2"
-              @click="openPreviewModal(result.downloadUrl, result.fileName)"
-            />
+        <template v-if="!result.isBatch">
+          <p style="margin-bottom: 12px;">
+            共 <strong>{{ result.pageCount }}</strong> 页
+          </p>
+          <p style="margin-bottom: 16px;">
+            文件大小：{{ formatFileSize(result.fileSize) }}
+          </p>
+
+          <div class="result-preview-section">
+            <h4 style="margin-bottom: 12px; color: #333;">
+              <el-icon style="margin-right: 8px;"><View /></el-icon>
+              转换结果预览
+            </h4>
+            <div class="result-preview-wrapper">
+              <PdfPreview 
+                :src="result.downloadUrl" 
+                width="150px" 
+                height="200px" 
+                :scale="1.2"
+                @click="openPreviewModal(result.downloadUrl, result.fileName)"
+              />
+            </div>
           </div>
-        </div>
 
-        <div style="text-align: center; margin-top: 24px;">
-          <button class="action-button" @click="downloadResult">
-            <el-icon style="margin-right: 8px;"><Download /></el-icon>
-            下载PDF
-          </button>
-        </div>
+          <div style="text-align: center; margin-top: 24px;">
+            <button class="action-button" @click="downloadResult">
+              <el-icon style="margin-right: 8px;"><Download /></el-icon>
+              下载PDF
+            </button>
+          </div>
+        </template>
+
+        <template v-else>
+          <p style="margin-bottom: 16px;">
+            共转换 <strong>{{ result.fileCount }}</strong> 个图片为独立PDF
+          </p>
+          <div style="margin-bottom: 16px;">
+            <p style="color: #666; margin-bottom: 8px;">转换结果：</p>
+            <div 
+              v-for="(r, idx) in result.results" 
+              :key="idx"
+              style="font-size: 13px; color: #666; padding: 8px 0; border-bottom: 1px solid #f0f0f0;"
+            >
+              <div style="font-weight: 500; color: #333; margin-bottom: 4px;">
+                <el-icon style="color: #67c23a; margin-right: 4px;"><CircleCheckFilled /></el-icon>
+                {{ r.originalName }}
+              </div>
+              <div v-if="r.success" style="padding-left: 20px;">
+                {{ formatFileSize(r.fileSize) }}
+              </div>
+              <div v-else style="padding-left: 20px; color: #f56c6c;">
+                转换失败：{{ r.error }}
+              </div>
+            </div>
+          </div>
+
+          <div style="text-align: center; margin-top: 24px;">
+            <button class="action-button" @click="downloadResult">
+              <el-icon style="margin-right: 8px;"><Download /></el-icon>
+              下载ZIP压缩包
+            </button>
+          </div>
+        </template>
       </div>
     </div>
 
-    <LoadingOverlay :visible="loading" text="正在转换为PDF..." />
+    <LoadingOverlay :visible="loading" :text="loadingText" />
     
     <PdfPreviewModal 
       v-model="previewModalVisible" 
@@ -175,11 +245,12 @@
 </template>
 
 <script setup>
-import { ref, onMounted, nextTick } from 'vue'
+import { ref, computed, onMounted, nextTick } from 'vue'
 import { ElMessage } from 'element-plus'
 import Sortable from 'sortablejs'
 import { 
   imageToPDF as imageToPDFApi, 
+  imageToPDFBatch,
   formatFileSize, 
   downloadFile 
 } from '../utils/api'
@@ -194,6 +265,7 @@ const isDragging = ref(false)
 const loading = ref(false)
 const result = ref(null)
 
+const processingMode = ref('merge')
 const pageSize = ref('A4')
 const customWidth = ref(800)
 const customHeight = ref(600)
@@ -211,6 +283,10 @@ const imagePreviewTitle = ref('图片预览')
 const imagePreviewUrls = ref({})
 
 let sortableInstance = null
+
+const loadingText = computed(() => {
+  return processingMode.value === 'merge' ? '正在合并为PDF...' : '正在批量转换PDF...'
+})
 
 const triggerFileInput = () => {
   fileInput.value.click()
@@ -250,6 +326,7 @@ const addFiles = (newFiles) => {
     return
   }
   files.value = [...files.value, ...newFiles]
+  result.value = null
   nextTick(() => {
     initSortable()
   })
@@ -257,12 +334,23 @@ const addFiles = (newFiles) => {
 
 const removeFile = (index) => {
   files.value.splice(index, 1)
+  result.value = null
   nextTick(() => {
     initSortable()
   })
 }
 
+const clearAllFiles = () => {
+  files.value = []
+  result.value = null
+  if (sortableInstance) {
+    sortableInstance.destroy()
+    sortableInstance = null
+  }
+}
+
 const initSortable = () => {
+  if (processingMode.value !== 'merge') return
   if (sortableInstance) {
     sortableInstance.destroy()
   }
@@ -291,8 +379,11 @@ const convertToPDF = async () => {
   const options = {
     pageSize: pageSize.value,
     margin: margin.value,
-    fit: fit.value,
-    order: files.value.map((_, idx) => idx)
+    fit: fit.value
+  }
+
+  if (processingMode.value === 'merge') {
+    options.order = files.value.map((_, idx) => idx)
   }
 
   if (pageSize.value === 'custom') {
@@ -304,9 +395,14 @@ const convertToPDF = async () => {
   result.value = null
 
   try {
-    const response = await imageToPDFApi(files.value, options)
+    let response
+    if (processingMode.value === 'batch') {
+      response = await imageToPDFBatch(files.value, options)
+    } else {
+      response = await imageToPDFApi(files.value, options)
+    }
     result.value = response.data
-    ElMessage.success('图片转PDF成功！')
+    ElMessage.success(processingMode.value === 'merge' ? '图片转PDF成功！' : '批量转换PDF成功！')
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '转换失败，请重试')
   } finally {
@@ -316,7 +412,11 @@ const convertToPDF = async () => {
 
 const downloadResult = () => {
   if (result.value) {
-    downloadFile(result.value.downloadUrl, `images_to_pdf_${Date.now()}.pdf`)
+    if (result.value.isBatch) {
+      downloadFile(result.value.downloadUrl, `images_to_pdf_batch_${Date.now()}.zip`)
+    } else {
+      downloadFile(result.value.downloadUrl, `images_to_pdf_${Date.now()}.pdf`)
+    }
   }
 }
 
@@ -391,5 +491,14 @@ onMounted(() => {
   max-height: 70vh;
   border-radius: 8px;
   box-shadow: 0 4px 20px rgba(0, 0, 0, 0.15);
+}
+
+.file-list-header {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  margin-bottom: 12px;
+  padding-bottom: 8px;
+  border-bottom: 1px solid #eee;
 }
 </style>

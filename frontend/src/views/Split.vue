@@ -7,7 +7,7 @@
 
     <div class="page-header">
       <h1>PDF拆分</h1>
-      <p>按页数、范围或指定页拆分PDF文件</p>
+      <p>按页数、范围或指定页拆分PDF文件（支持批量）</p>
     </div>
 
     <div class="tool-card">
@@ -18,43 +18,45 @@
         @dragleave="isDragging = false"
         @drop.prevent="handleDrop"
         @click="triggerFileInput"
-        v-if="!file"
       >
         <el-icon :size="48" color="#667eea"><UploadFilled /></el-icon>
         <p style="font-size: 18px; margin-top: 16px; color: #333;">
-          拖拽PDF文件到此处，或点击选择文件
+          拖拽PDF文件到此处，或点击选择文件（支持批量）
         </p>
         <input 
           ref="fileInput"
           type="file" 
           accept=".pdf"
+          multiple
           style="display: none;"
           @change="handleFileSelect"
         />
       </div>
 
-      <div v-if="file" class="file-item" style="margin-bottom: 24px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <PdfPreview 
-            :src="file" 
-            width="80px" 
-            height="100px" 
-            :scale="1"
-            @click="openPreviewModal(file, file.name)"
-          />
-          <div>
-            <span style="font-weight: 500; color: #333;">{{ file.name }}</span>
-            <div style="color: #999; font-size: 13px; margin-top: 4px;">
-              {{ formatFileSize(file.size) }}
+      <div v-if="files.length > 0" style="margin-bottom: 24px;">
+        <div v-for="(f, index) in files" :key="index" class="file-item" style="margin-bottom: 12px;">
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <PdfPreview 
+              :src="f" 
+              width="80px" 
+              height="100px" 
+              :scale="1"
+              @click="openPreviewModal(f, f.name)"
+            />
+            <div>
+              <span style="font-weight: 500; color: #333;">{{ f.name }}</span>
+              <div style="color: #999; font-size: 13px; margin-top: 4px;">
+                {{ formatFileSize(f.size) }}
+              </div>
             </div>
           </div>
+          <el-button type="danger" text @click="removeFile(index)">
+            <el-icon><Delete /></el-icon>
+          </el-button>
         </div>
-        <el-button type="danger" text @click="removeFile">
-          <el-icon><Delete /></el-icon>
-        </el-button>
       </div>
 
-      <div v-if="file">
+      <div v-if="files.length > 0">
         <div class="setting-row">
           <span class="setting-label">拆分方式：</span>
           <el-radio-group v-model="splitMode">
@@ -93,7 +95,7 @@
         <div style="text-align: center; margin-top: 24px;">
           <button class="action-button" @click="splitPDF" :disabled="loading">
             <el-icon style="margin-right: 8px;"><Scissor /></el-icon>
-            开始拆分
+            开始拆分（{{ files.length }}个文件）
           </button>
         </div>
       </div>
@@ -103,49 +105,58 @@
           <el-icon style="margin-right: 8px;"><CircleCheckFilled /></el-icon>
           拆分成功！
         </h3>
-        <p style="margin-bottom: 12px;">
-          共拆分为 <strong>{{ result.fileCount }}</strong> 个文件
-        </p>
-        <p style="margin-bottom: 16px;">
-          压缩包大小：{{ formatFileSize(result.fileSize) }}
-        </p>
-        <div v-if="result.files && result.files.length > 0" style="margin-bottom: 16px;">
-          <p style="color: #666; margin-bottom: 8px;">包含文件：</p>
-          <div 
-            v-for="(f, idx) in result.files.slice(0, 5)" 
-            :key="idx"
-            style="font-size: 13px; color: #666; padding: 4px 0;"
-          >
-            {{ f.name }} ({{ formatFileSize(f.size) }})
-          </div>
-          <p v-if="result.files.length > 5" style="font-size: 13px; color: #999;">
-            还有 {{ result.files.length - 5 }} 个文件...
-          </p>
-        </div>
 
-        <div class="result-preview-section">
-          <h4 style="margin-bottom: 12px; color: #333;">
-            <el-icon style="margin-right: 8px;"><View /></el-icon>
-            原始PDF预览
-          </h4>
-          <p style="font-size: 13px; color: #999; margin-bottom: 12px;">
-            拆分后的文件已打包至ZIP压缩包，点击下载查看
+        <template v-if="!result.isBatch">
+          <p style="margin-bottom: 12px;">
+            共拆分为 <strong>{{ result.fileCount }}</strong> 个文件
           </p>
-          <div class="result-preview-wrapper">
-            <PdfPreview 
-              :src="file" 
-              width="150px" 
-              height="200px" 
-              :scale="1.2"
-              @click="openPreviewModal(file, file.name)"
-            />
+          <div v-if="result.files && result.files.length > 0" style="margin-bottom: 16px;">
+            <p style="color: #666; margin-bottom: 8px;">文件列表：</p>
+            <div 
+              v-for="(f, idx) in result.files" 
+              :key="idx"
+              class="split-file-item"
+            >
+              <el-icon color="#667eea" style="margin-right: 8px;"><Document /></el-icon>
+              <span style="font-weight: 500; color: #333; flex: 1;">{{ f.name }}</span>
+              <span style="color: #999; font-size: 13px;">{{ formatFileSize(f.size) }}</span>
+            </div>
           </div>
-        </div>
+        </template>
+
+        <template v-else>
+          <p style="margin-bottom: 12px;">
+            共处理 <strong>{{ result.pdfCount || result.results?.filter(r => r.success).length }}</strong> 个PDF文件，
+            生成 <strong>{{ result.fileCount }}</strong> 个拆分文件
+          </p>
+          <div v-if="result.results && result.results.length > 0" style="margin-bottom: 16px;">
+            <p style="color: #666; margin-bottom: 8px;">拆分结果：</p>
+            <div 
+              v-for="(r, idx) in result.results" 
+              :key="idx"
+              class="split-result-item"
+            >
+              <div class="split-result-header">
+                <el-icon :size="18" :color="r.success ? '#67c23a' : '#f56c6c'">
+                  <CircleCheckFilled v-if="r.success" />
+                  <CircleCloseFilled v-else />
+                </el-icon>
+                <span style="font-weight: 500; color: #333;">{{ r.originalName }}</span>
+              </div>
+              <div v-if="r.success" style="padding-left: 26px; margin-top: 4px; color: #666; font-size: 13px;">
+                <span>共 {{ r.totalPages }} 页，拆分为 {{ r.fileCount }} 个文件</span>
+              </div>
+              <div v-else style="padding-left: 26px; margin-top: 4px; color: #f56c6c; font-size: 13px;">
+                处理失败：{{ r.error }}
+              </div>
+            </div>
+          </div>
+        </template>
 
         <div style="text-align: center; margin-top: 24px;">
           <button class="action-button" @click="downloadResult">
             <el-icon style="margin-right: 8px;"><Download /></el-icon>
-            下载ZIP压缩包
+            {{ result.isBatch ? '下载全部 (ZIP)' : '下载ZIP压缩包' }}
           </button>
         </div>
       </div>
@@ -172,9 +183,10 @@ import {
 import LoadingOverlay from '../components/LoadingOverlay.vue'
 import PdfPreview from '../components/PdfPreview.vue'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
+import { CircleCheckFilled, CircleCloseFilled, Document } from '@element-plus/icons-vue'
 
 const fileInput = ref(null)
-const file = ref(null)
+const files = ref([])
 const isDragging = ref(false)
 const loading = ref(false)
 const result = ref(null)
@@ -191,33 +203,59 @@ const triggerFileInput = () => {
   fileInput.value.click()
 }
 
-const handleFileSelect = (e) => {
-  const selectedFile = e.target.files[0]
-  if (selectedFile && selectedFile.type === 'application/pdf') {
-    file.value = selectedFile
+const isFileDuplicate = (newFile) => {
+  return files.value.some(
+    f => f.name === newFile.name && f.size === newFile.size && f.lastModified === newFile.lastModified
+  )
+}
+
+const addFiles = (fileList) => {
+  let addedCount = 0
+  for (let i = 0; i < fileList.length; i++) {
+    const f = fileList[i]
+    if (f && f.type === 'application/pdf') {
+      if (!isFileDuplicate(f)) {
+        files.value.push(f)
+        addedCount++
+      }
+    } else if (f) {
+      ElMessage.warning(`文件 "${f.name}" 不是PDF格式，已跳过`)
+    }
+  }
+  if (addedCount > 0) {
     result.value = null
+  }
+  return addedCount
+}
+
+const handleFileSelect = (e) => {
+  const selectedFiles = e.target.files
+  if (selectedFiles && selectedFiles.length > 0) {
+    addFiles(selectedFiles)
   }
   e.target.value = ''
 }
 
 const handleDrop = (e) => {
   isDragging.value = false
-  const droppedFile = e.dataTransfer.files[0]
-  if (droppedFile && droppedFile.type === 'application/pdf') {
-    file.value = droppedFile
-    result.value = null
+  const droppedFiles = e.dataTransfer.files
+  if (droppedFiles && droppedFiles.length > 0) {
+    const addedCount = addFiles(droppedFiles)
+    if (addedCount === 0) {
+      ElMessage.warning('请拖入PDF文件')
+    }
   } else {
     ElMessage.warning('请拖入PDF文件')
   }
 }
 
-const removeFile = () => {
-  file.value = null
+const removeFile = (index) => {
+  files.value.splice(index, 1)
   result.value = null
 }
 
 const splitPDF = async () => {
-  if (!file.value) {
+  if (!files.value || files.value.length === 0) {
     ElMessage.warning('请上传PDF文件')
     return
   }
@@ -244,7 +282,7 @@ const splitPDF = async () => {
   result.value = null
 
   try {
-    const response = await splitPDFApi(file.value, options)
+    const response = await splitPDFApi(files.value, options)
     result.value = response.data
     ElMessage.success('PDF拆分成功！')
   } catch (error) {
@@ -277,5 +315,35 @@ const openPreviewModal = (src, title) => {
 .result-preview-wrapper {
   display: flex;
   justify-content: center;
+}
+
+.split-file-item {
+  display: flex;
+  align-items: center;
+  padding: 10px 14px;
+  background: #f8f9fa;
+  border-radius: 6px;
+  margin-bottom: 6px;
+  border: 1px solid #e9ecef;
+}
+
+.split-result-item {
+  padding: 12px 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid #e9ecef;
+  transition: all 0.2s;
+}
+
+.split-result-item:hover {
+  background: #f0f5ff;
+  border-color: #d6e4ff;
+}
+
+.split-result-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 </style>

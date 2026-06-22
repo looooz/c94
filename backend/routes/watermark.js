@@ -3,6 +3,7 @@ const router = express.Router();
 const fs = require('fs-extra');
 const path = require('path');
 const { PDFDocument, StandardFonts, rgb, degrees } = require('pdf-lib');
+const archiver = require('archiver');
 const { v4: uuidv4 } = require('uuid');
 const upload = require('../middleware/upload');
 const { addHistory } = require('../utils/history');
@@ -101,162 +102,279 @@ const getWatermarkPositions = (pageWidth, pageHeight, position, watermarkWidth, 
   return positions;
 };
 
-router.post('/', upload.fields([{ name: 'pdf', maxCount: 1 }, { name: 'watermarkImage', maxCount: 1 }]), async (req, res) => {
+const addWatermarkToSinglePDF = async (pdfFile, options, watermarkImageFile) => {
+  const {
+    type = 'text',
+    text = 'CONFIDENTIAL',
+    fontSize = 48,
+    color = '#ff0000',
+    opacity = 0.3,
+    position = 'center',
+    rotation = 0,
+    fontFamily = 'Helvetica',
+    imageScale = 0.5,
+    watermarkSpacingX = 1.0,
+    watermarkSpacingY = 1.0
+  } = options;
+
+  const pdfBytes = fs.readFileSync(pdfFile.path);
+  const pdfDoc = await PDFDocument.load(pdfBytes);
+  const pages = pdfDoc.getPages();
+
+  const opacityNum = parseFloat(opacity) || 0.3;
+  const fontSizeNum = parseInt(fontSize) || 48;
+  const rotationNum = parseInt(rotation) || 0;
+  const watermarkColor = parseColor(color);
+
+  let embeddedWatermarkImage = null;
+  let watermarkImgWidth = 0;
+  let watermarkImgHeight = 0;
+  let useImageMode = (type === 'image' && watermarkImageFile);
+
+  if (useImageMode && watermarkImageFile) {
+    const imgBytes = fs.readFileSync(watermarkImageFile.path);
+    try {
+      if (watermarkImageFile.mimetype === 'image/png') {
+        embeddedWatermarkImage = await pdfDoc.embedPng(imgBytes);
+      } else {
+        embeddedWatermarkImage = await pdfDoc.embedJpg(imgBytes);
+      }
+      const scale = parseFloat(imageScale) || 0.5;
+      watermarkImgWidth = embeddedWatermarkImage.width * scale;
+      watermarkImgHeight = embeddedWatermarkImage.height * scale;
+    } catch (e) {
+      throw new Error('Invalid watermark image');
+    }
+  }
+
+  let watermarkFont;
+  let textWidth = 0;
+  let textHeight = fontSizeNum;
+  const hasChinese = /[\u4e00-\u9fa5]/.test(text);
+
+  if (type === 'text' && !hasChinese) {
+    try {
+      const fontMap = {
+        'Helvetica': StandardFonts.Helvetica,
+        'Helvetica-Bold': StandardFonts.HelveticaBold,
+        'Times-Roman': StandardFonts.TimesRoman,
+        'Times-Bold': StandardFonts.TimesRomanBold,
+        'Courier': StandardFonts.Courier,
+        'Courier-Bold': StandardFonts.CourierBold
+      };
+      watermarkFont = await pdfDoc.embedFont(fontMap[fontFamily] || StandardFonts.Helvetica);
+      textWidth = watermarkFont.widthOfTextAtSize(text, fontSizeNum);
+    } catch (e) {
+      watermarkFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
+      textWidth = watermarkFont.widthOfTextAtSize(text, fontSizeNum);
+    }
+  } else if (type === 'text' && hasChinese) {
+    if (!watermarkImageFile) {
+      throw new Error('Chinese text watermark requires image generation');
+    }
+    const imgBytes = fs.readFileSync(watermarkImageFile.path);
+    try {
+      if (watermarkImageFile.mimetype === 'image/png') {
+        embeddedWatermarkImage = await pdfDoc.embedPng(imgBytes);
+      } else {
+        embeddedWatermarkImage = await pdfDoc.embedJpg(imgBytes);
+      }
+      const scale = parseFloat(imageScale) || 1.0;
+      watermarkImgWidth = embeddedWatermarkImage.width * scale;
+      watermarkImgHeight = embeddedWatermarkImage.height * scale;
+      useImageMode = true;
+    } catch (e) {
+      throw new Error('Invalid watermark image for Chinese text');
+    }
+  }
+
+  for (const page of pages) {
+    const { width: pageWidth, height: pageHeight } = page.getSize();
+
+    if (type === 'text' && !hasChinese && watermarkFont) {
+      const positions = getWatermarkPositions(pageWidth, pageHeight, position, textWidth, textHeight, 30, parseFloat(watermarkSpacingX) || 1.0, parseFloat(watermarkSpacingY) || 1.0);
+
+      for (const pos of positions) {
+        const rotateAngle = pos.rotate !== undefined ? pos.rotate : rotationNum;
+        page.drawText(text, {
+          x: pos.x,
+          y: pos.y,
+          size: fontSizeNum,
+          font: watermarkFont,
+          color: rgb(watermarkColor.r / 255, watermarkColor.g / 255, watermarkColor.b / 255),
+          opacity: opacityNum,
+          rotate: degrees(rotateAngle)
+        });
+      }
+    } else if (useImageMode && embeddedWatermarkImage) {
+      const positions = getWatermarkPositions(pageWidth, pageHeight, position, watermarkImgWidth, watermarkImgHeight, 30, parseFloat(watermarkSpacingX) || 1.0, parseFloat(watermarkSpacingY) || 1.0);
+
+      for (const pos of positions) {
+        const rotateAngle = pos.rotate !== undefined ? pos.rotate : rotationNum;
+        page.drawImage(embeddedWatermarkImage, {
+          x: pos.x,
+          y: pos.y,
+          width: watermarkImgWidth,
+          height: watermarkImgHeight,
+          opacity: opacityNum,
+          rotate: degrees(rotateAngle)
+        });
+      }
+    }
+  }
+
+  const watermarkedBytes = await pdfDoc.save();
+  const baseName = path.basename(pdfFile.originalname, path.extname(pdfFile.originalname));
+  const outputFileName = `watermarked_${baseName}_${uuidv4().slice(0, 8)}.pdf`;
+
+  return {
+    originalName: pdfFile.originalname,
+    outputFileName,
+    watermarkedBytes
+  };
+};
+
+router.post('/', upload.fields([{ name: 'pdfs', maxCount: 20 }, { name: 'watermarkImage', maxCount: 1 }]), async (req, res) => {
   try {
-    if (!req.files || !req.files.pdf) {
-      return res.status(400).json({ error: 'Please upload a PDF file' });
+    if (!req.files || !req.files.pdfs || req.files.pdfs.length === 0) {
+      return res.status(400).json({ error: 'Please upload at least one PDF file' });
     }
 
-    const pdfFile = req.files.pdf[0];
+    const pdfFiles = req.files.pdfs;
     const watermarkImageFile = req.files.watermarkImage ? req.files.watermarkImage[0] : null;
 
-    const {
-      type = 'text',
-      text = 'CONFIDENTIAL',
-      fontSize = 48,
-      color = '#ff0000',
-      opacity = 0.3,
-      position = 'center',
-      rotation = 0,
-      fontFamily = 'Helvetica',
-      imageScale = 0.5,
-      watermarkSpacingX = 1.0,
-      watermarkSpacingY = 1.0
-    } = req.body;
+    const options = {
+      type: req.body.type || 'text',
+      text: req.body.text || 'CONFIDENTIAL',
+      fontSize: req.body.fontSize || 48,
+      color: req.body.color || '#ff0000',
+      opacity: req.body.opacity || 0.3,
+      position: req.body.position || 'center',
+      rotation: req.body.rotation || 0,
+      fontFamily: req.body.fontFamily || 'Helvetica',
+      imageScale: req.body.imageScale || 0.5,
+      watermarkSpacingX: req.body.watermarkSpacingX || 1.0,
+      watermarkSpacingY: req.body.watermarkSpacingY || 1.0
+    };
 
-    const pdfBytes = fs.readFileSync(pdfFile.path);
-    const pdfDoc = await PDFDocument.load(pdfBytes);
-    const pages = pdfDoc.getPages();
+    const hasChinese = /[\u4e00-\u9fa5]/.test(options.text);
 
-    const opacityNum = parseFloat(opacity) || 0.3;
-    const fontSizeNum = parseInt(fontSize) || 48;
-    const rotationNum = parseInt(rotation) || 0;
-    const watermarkColor = parseColor(color);
+    if (options.type === 'text' && hasChinese && !watermarkImageFile) {
+      return res.status(400).json({ error: 'Chinese text watermark requires image generation. Please use the frontend to generate the watermark image.' });
+    }
 
-    let embeddedWatermarkImage = null;
-    let watermarkImgWidth = 0;
-    let watermarkImgHeight = 0;
-    let useImageMode = (type === 'image' && watermarkImageFile);
+    const sessionId = uuidv4();
+    const sessionDir = path.join(outputDir, sessionId);
+    fs.ensureDirSync(sessionDir);
 
-    if (useImageMode && watermarkImageFile) {
-      const imgBytes = fs.readFileSync(watermarkImageFile.path);
+    const results = [];
+
+    for (let i = 0; i < pdfFiles.length; i++) {
+      const pdfFile = pdfFiles[i];
       try {
-        if (watermarkImageFile.mimetype === 'image/png') {
-          embeddedWatermarkImage = await pdfDoc.embedPng(imgBytes);
-        } else {
-          embeddedWatermarkImage = await pdfDoc.embedJpg(imgBytes);
+        const result = await addWatermarkToSinglePDF(pdfFile, options, watermarkImageFile);
+        const outputPath = path.join(sessionDir, result.outputFileName);
+        fs.writeFileSync(outputPath, result.watermarkedBytes);
+        const fileSize = fs.statSync(outputPath).size;
+        results.push({
+          originalName: result.originalName,
+          outputFileName: result.outputFileName,
+          fileSize,
+          success: true
+        });
+      } catch (err) {
+        console.error(`Error adding watermark to ${pdfFile.originalname}:`, err);
+        results.push({
+          originalName: pdfFile.originalname,
+          success: false,
+          error: err.message
+        });
+      } finally {
+        if (fs.existsSync(pdfFile.path)) {
+          fs.removeSync(pdfFile.path);
         }
-        const scale = parseFloat(imageScale) || 0.5;
-        watermarkImgWidth = embeddedWatermarkImage.width * scale;
-        watermarkImgHeight = embeddedWatermarkImage.height * scale;
-      } catch (e) {
-        return res.status(400).json({ error: 'Invalid watermark image' });
       }
+    }
+
+    if (watermarkImageFile && fs.existsSync(watermarkImageFile.path)) {
       fs.removeSync(watermarkImageFile.path);
     }
 
-    let watermarkFont;
-    let textWidth = 0;
-    let textHeight = fontSizeNum;
-    const hasChinese = /[\u4e00-\u9fa5]/.test(text);
-
-    if (type === 'text' && !hasChinese) {
-      try {
-        const fontMap = {
-          'Helvetica': StandardFonts.Helvetica,
-          'Helvetica-Bold': StandardFonts.HelveticaBold,
-          'Times-Roman': StandardFonts.TimesRoman,
-          'Times-Bold': StandardFonts.TimesRomanBold,
-          'Courier': StandardFonts.Courier,
-          'Courier-Bold': StandardFonts.CourierBold
-        };
-        watermarkFont = await pdfDoc.embedFont(fontMap[fontFamily] || StandardFonts.Helvetica);
-        textWidth = watermarkFont.widthOfTextAtSize(text, fontSizeNum);
-      } catch (e) {
-        watermarkFont = await pdfDoc.embedFont(StandardFonts.Helvetica);
-        textWidth = watermarkFont.widthOfTextAtSize(text, fontSizeNum);
-      }
-    } else if (type === 'text' && hasChinese) {
-      if (!watermarkImageFile) {
-        return res.status(400).json({ error: 'Chinese text watermark requires image generation. Please use the frontend to generate the watermark image.' });
-      }
-      const imgBytes = fs.readFileSync(watermarkImageFile.path);
-      try {
-        if (watermarkImageFile.mimetype === 'image/png') {
-          embeddedWatermarkImage = await pdfDoc.embedPng(imgBytes);
-        } else {
-          embeddedWatermarkImage = await pdfDoc.embedJpg(imgBytes);
-        }
-        const scale = parseFloat(imageScale) || 1.0;
-        watermarkImgWidth = embeddedWatermarkImage.width * scale;
-        watermarkImgHeight = embeddedWatermarkImage.height * scale;
-        useImageMode = true;
-      } catch (e) {
-        return res.status(400).json({ error: 'Invalid watermark image for Chinese text' });
-      }
-      fs.removeSync(watermarkImageFile.path);
+    const successResults = results.filter(r => r.success);
+    if (successResults.length === 0) {
+      fs.removeSync(sessionDir);
+      return res.status(500).json({ error: 'Failed to add watermark to any PDF files' });
     }
 
-    for (const page of pages) {
-      const { width: pageWidth, height: pageHeight } = page.getSize();
+    if (successResults.length === 1) {
+      const singleResult = successResults[0];
+      const srcPath = path.join(sessionDir, singleResult.outputFileName);
+      const destPath = path.join(outputDir, singleResult.outputFileName);
+      fs.moveSync(srcPath, destPath, { overwrite: true });
+      fs.removeSync(sessionDir);
 
-      if (type === 'text' && !hasChinese && watermarkFont) {
-        const positions = getWatermarkPositions(pageWidth, pageHeight, position, textWidth, textHeight, 30, parseFloat(watermarkSpacingX) || 1.0, parseFloat(watermarkSpacingY) || 1.0);
+      const historyRecord = addHistory({
+        type: 'watermark',
+        fileName: singleResult.outputFileName,
+        originalName: `watermarked_${singleResult.originalName}`,
+        fileSize: singleResult.fileSize,
+        filePath: `output/${singleResult.outputFileName}`,
+        downloadUrl: `/download/${singleResult.outputFileName}`,
+        watermarkType: options.type
+      });
 
-        for (const pos of positions) {
-          const rotateAngle = pos.rotate !== undefined ? pos.rotate : rotationNum;
-          page.drawText(text, {
-            x: pos.x,
-            y: pos.y,
-            size: fontSizeNum,
-            font: watermarkFont,
-            color: rgb(watermarkColor.r / 255, watermarkColor.g / 255, watermarkColor.b / 255),
-            opacity: opacityNum,
-            rotate: degrees(rotateAngle)
-          });
-        }
-      } else if (useImageMode && embeddedWatermarkImage) {
-        const positions = getWatermarkPositions(pageWidth, pageHeight, position, watermarkImgWidth, watermarkImgHeight, 30, parseFloat(watermarkSpacingX) || 1.0, parseFloat(watermarkSpacingY) || 1.0);
-
-        for (const pos of positions) {
-          const rotateAngle = pos.rotate !== undefined ? pos.rotate : rotationNum;
-          page.drawImage(embeddedWatermarkImage, {
-            x: pos.x,
-            y: pos.y,
-            width: watermarkImgWidth,
-            height: watermarkImgHeight,
-            opacity: opacityNum,
-            rotate: degrees(rotateAngle)
-          });
-        }
-      }
+      return res.json({
+        success: true,
+        isBatch: false,
+        downloadUrl: `/download/${singleResult.outputFileName}`,
+        fileName: singleResult.outputFileName,
+        fileSize: singleResult.fileSize,
+        previewUrl: `/download/${singleResult.outputFileName}`,
+        historyId: historyRecord.id,
+        results
+      });
     }
 
-    const watermarkedBytes = await pdfDoc.save();
-    const outputFileName = `watermarked_${uuidv4()}.pdf`;
-    const outputPath = path.join(outputDir, outputFileName);
-    fs.writeFileSync(outputPath, watermarkedBytes);
+    const zipName = `watermarked_batch_${sessionId}.zip`;
+    const zipPath = path.join(outputDir, zipName);
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
 
-    fs.removeSync(pdfFile.path);
+    archive.pipe(output);
+    successResults.forEach(r => {
+      const filePath = path.join(sessionDir, r.outputFileName);
+      archive.file(filePath, { name: r.outputFileName });
+    });
+    await archive.finalize();
 
-    const fileSize = fs.statSync(outputPath).size;
+    fs.removeSync(sessionDir);
+
+    const fileSize = fs.statSync(zipPath).size;
+    let totalFileSize = 0;
+    successResults.forEach(r => {
+      totalFileSize += r.fileSize;
+    });
+
     const historyRecord = addHistory({
       type: 'watermark',
-      fileName: outputFileName,
-      originalName: `watermarked_${pdfFile.originalname}`,
-      fileSize: fileSize,
-      filePath: `output/${outputFileName}`,
-      downloadUrl: `/download/${outputFileName}`,
-      watermarkType: type
+      fileName: zipName,
+      originalName: `watermarked_batch_${successResults.length}_files.zip`,
+      fileSize,
+      filePath: `output/${zipName}`,
+      downloadUrl: `/download/${zipName}`,
+      watermarkType: options.type,
+      fileCount: successResults.length
     });
 
     res.json({
       success: true,
-      downloadUrl: `/download/${outputFileName}`,
-      fileName: outputFileName,
-      fileSize: fileSize,
-      previewUrl: `/download/${outputFileName}`,
-      historyId: historyRecord.id
+      isBatch: true,
+      downloadUrl: `/download/${zipName}`,
+      fileName: zipName,
+      fileSize,
+      fileCount: successResults.length,
+      historyId: historyRecord.id,
+      results
     });
   } catch (error) {
     console.error('Watermark error:', error);

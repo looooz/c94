@@ -7,7 +7,7 @@
 
     <div class="page-header">
       <h1>PDF加水印</h1>
-      <p>添加文字或图片水印，支持自定义位置和透明度</p>
+      <p>添加文字或图片水印，支持批量处理、自定义位置和透明度</p>
     </div>
 
     <div class="tool-card">
@@ -19,60 +19,62 @@
           @dragleave="isDragging = false"
           @drop.prevent="handleDrop"
           @click="triggerFileInput"
-          v-if="!file"
         >
           <div class="upload-icon-wrapper">
             <el-icon :size="56" color="#667eea"><UploadFilled /></el-icon>
           </div>
           <p class="upload-title">拖拽PDF文件到此处，或点击选择文件</p>
-          <p class="upload-hint">支持 PDF 格式文件</p>
+          <p class="upload-hint">支持 PDF 格式文件，可批量选择多个文件</p>
           <input 
             ref="fileInput"
             type="file" 
             accept=".pdf"
+            multiple
             style="display: none;"
             @change="handleFileSelect"
           />
         </div>
 
-        <div v-if="file" class="selected-file-card">
-          <div class="file-info-wrapper">
-            <PdfPreview 
-              :src="file" 
-              width="100px" 
-              height="130px" 
-              :scale="1"
-              class="file-thumbnail"
-              @click="openPreviewModal(file, file.name)"
-            />
-            <div class="file-details">
-              <div class="file-name">{{ file.name }}</div>
-              <div class="file-meta">
-                <span class="file-size">
-                  <el-icon><Document /></el-icon>
-                  {{ formatFileSize(file.size) }}
-                </span>
-                <span v-if="totalPages > 0" class="file-pages">
-                  <el-icon><Files /></el-icon>
-                  {{ totalPages }} 页
-                </span>
-              </div>
-              <div class="file-status">
-                <el-tag type="success" size="small" effect="light">
-                  <el-icon><CircleCheckFilled /></el-icon>
-                  已上传
-                </el-tag>
+        <div v-if="files.length > 0" class="file-list">
+          <div 
+            v-for="(fileItem, index) in files" 
+            :key="getFileKey(fileItem)"
+            class="selected-file-card"
+          >
+            <div class="file-info-wrapper">
+              <PdfPreview 
+                :src="fileItem" 
+                width="100px" 
+                height="130px" 
+                :scale="1"
+                class="file-thumbnail"
+                @click="openPreviewModal(fileItem, fileItem.name)"
+              />
+              <div class="file-details">
+                <div class="file-name">{{ fileItem.name }}</div>
+                <div class="file-meta">
+                  <span class="file-size">
+                    <el-icon><Document /></el-icon>
+                    {{ formatFileSize(fileItem.size) }}
+                  </span>
+                </div>
+                <div class="file-status">
+                  <el-tag type="success" size="small" effect="light">
+                    <el-icon><CircleCheckFilled /></el-icon>
+                    已上传
+                  </el-tag>
+                </div>
               </div>
             </div>
+            <el-button type="danger" @click="removeFile(index)" class="remove-btn">
+              <el-icon><Delete /></el-icon>
+              移除
+            </el-button>
           </div>
-          <el-button type="danger" @click="removeFile" class="remove-btn">
-            <el-icon><Delete /></el-icon>
-            移除文件
-          </el-button>
         </div>
       </div>
 
-      <div v-if="file" class="settings-container">
+      <div v-if="files.length > 0" class="settings-container">
         <div class="settings-section">
           <div class="section-header">
             <div class="section-title">
@@ -201,14 +203,7 @@
             <div class="setting-row">
               <span class="setting-label">水印位置</span>
               <el-select v-model="position" class="control-select">
-                <el-option label="左上角" value="top-left">
-                  <span style="display: flex; align-items: center; gap: 8px;">
-                    <span style="display: inline-block; width: 16px; height: 16px; border: 1px solid #ddd; position: relative;">
-                      <span style="position: absolute; top: 0; left: 0; width: 6px; height: 6px; background: #667eea;"></span>
-                    </span>
-                    左上角
-                  </span>
-                </el-option>
+                <el-option label="左上角" value="top-left" />
                 <el-option label="顶部居中" value="top-center" />
                 <el-option label="右上角" value="top-right" />
                 <el-option label="中间靠左" value="center-left" />
@@ -325,44 +320,8 @@
           </div>
           <button class="action-button primary-large" @click="addWatermark" :disabled="loading || !canSubmit">
             <el-icon style="margin-right: 10px;"><Stamp /></el-icon>
-            {{ loading ? '正在添加水印...' : '添加水印' }}
+            {{ loading ? '正在添加水印...' : `添加水印（${files.length}个文件）` }}
           </button>
-        </div>
-      </div>
-
-      <div v-if="file && !result" class="original-preview-section">
-        <div class="section-header">
-          <div class="section-title">
-            <el-icon color="#667eea"><Document /></el-icon>
-            <span>原始PDF预览</span>
-          </div>
-        </div>
-        <div class="pdf-preview-container">
-          <canvas ref="beforePreviewCanvas" class="preview-canvas"></canvas>
-        </div>
-        <div v-if="totalPages > 1" class="page-navigation">
-          <el-button 
-            :disabled="currentPage === 1" 
-            @click="currentPage--; renderPreviewPage('before', currentPage)"
-            size="small"
-          >
-            <el-icon><ArrowLeft /></el-icon> 上一页
-          </el-button>
-          <el-pagination
-            v-model:current-page="currentPage"
-            :page-count="totalPages"
-            :page-size="1"
-            layout="prev, pager, next"
-            size="small"
-            @current-change="(p) => renderPreviewPage('before', p)"
-          />
-          <el-button 
-            :disabled="currentPage === totalPages" 
-            @click="currentPage++; renderPreviewPage('before', currentPage)"
-            size="small"
-          >
-            下一页 <el-icon><ArrowRight /></el-icon>
-          </el-button>
         </div>
       </div>
 
@@ -374,62 +333,96 @@
           <div class="success-info">
             <h3>水印添加成功！</h3>
             <div class="success-meta">
-              <span><el-icon><Document /></el-icon> {{ result.fileName }}</span>
-              <span><el-icon><FolderOpened /></el-icon> {{ formatFileSize(result.fileSize) }}</span>
+              <template v-if="isBatch">
+                <span><el-icon><Files /></el-icon> 共处理 {{ result.fileCount }} 个文件，打包为ZIP下载</span>
+              </template>
+              <template v-else>
+                <span><el-icon><Document /></el-icon> {{ result.fileName }}</span>
+                <span><el-icon><FolderOpened /></el-icon> {{ formatFileSize(result.fileSize) }}</span>
+              </template>
             </div>
           </div>
         </div>
-        
-        <div class="preview-comparison">
-          <div class="preview-column">
-            <div class="column-header before">
-              <el-icon><Document /></el-icon>
-              <span>处理前</span>
-            </div>
-            <div class="pdf-preview-container">
-              <canvas ref="beforeCompareCanvas" class="preview-canvas"></canvas>
+
+        <template v-if="isBatch && result.results">
+          <div class="batch-result-list">
+            <div 
+              v-for="(item, index) in result.results" 
+              :key="index"
+              class="batch-result-item"
+            >
+              <div class="batch-item-icon">
+                <el-icon :color="item.success ? '#67c23a' : '#f56c6c'">
+                  <CircleCheckFilled v-if="item.success" />
+                  <CircleCloseFilled v-else />
+                </el-icon>
+              </div>
+              <div class="batch-item-info">
+                <div class="batch-item-name">{{ item.originalName }}</div>
+                <div v-if="item.success" class="batch-item-size">
+                  <el-icon><FolderOpened /></el-icon>
+                  {{ formatFileSize(item.fileSize) }}
+                </div>
+                <div v-else class="batch-item-error">
+                  处理失败：{{ item.error }}
+                </div>
+              </div>
             </div>
           </div>
-          <div class="preview-column">
-            <div class="column-header after">
-              <el-icon><CircleCheckFilled /></el-icon>
-              <span>处理后</span>
+        </template>
+
+        <template v-if="!isBatch">
+          <div class="preview-comparison">
+            <div class="preview-column">
+              <div class="column-header before">
+                <el-icon><Document /></el-icon>
+                <span>处理前</span>
+              </div>
+              <div class="pdf-preview-container">
+                <canvas ref="beforeCompareCanvas" class="preview-canvas"></canvas>
+              </div>
             </div>
-            <div class="pdf-preview-container">
-              <canvas ref="afterPreviewCanvas" class="preview-canvas"></canvas>
+            <div class="preview-column">
+              <div class="column-header after">
+                <el-icon><CircleCheckFilled /></el-icon>
+                <span>处理后</span>
+              </div>
+              <div class="pdf-preview-container">
+                <canvas ref="afterPreviewCanvas" class="preview-canvas"></canvas>
+              </div>
             </div>
           </div>
-        </div>
-        
-        <div v-if="totalPages > 1" class="page-navigation">
-          <el-button 
-            :disabled="comparePage === 1" 
-            @click="comparePage--; renderComparePages(comparePage)"
-            size="small"
-          >
-            <el-icon><ArrowLeft /></el-icon> 上一页
-          </el-button>
-          <el-pagination
-            v-model:current-page="comparePage"
-            :page-count="totalPages"
-            :page-size="1"
-            layout="prev, pager, next"
-            size="small"
-            @current-change="(p) => renderComparePages(p)"
-          />
-          <el-button 
-            :disabled="comparePage === totalPages" 
-            @click="comparePage++; renderComparePages(comparePage)"
-            size="small"
-          >
-            下一页 <el-icon><ArrowRight /></el-icon>
-          </el-button>
-        </div>
+
+          <div v-if="compareTotalPages > 1" class="page-navigation">
+            <el-button 
+              :disabled="comparePage === 1" 
+              @click="comparePage--; renderComparePages(comparePage)"
+              size="small"
+            >
+              <el-icon><ArrowLeft /></el-icon> 上一页
+            </el-button>
+            <el-pagination
+              v-model:current-page="comparePage"
+              :page-count="compareTotalPages"
+              :page-size="1"
+              layout="prev, pager, next"
+              size="small"
+              @current-change="(p) => renderComparePages(p)"
+            />
+            <el-button 
+              :disabled="comparePage === compareTotalPages" 
+              @click="comparePage++; renderComparePages(comparePage)"
+              size="small"
+            >
+              下一页 <el-icon><ArrowRight /></el-icon>
+            </el-button>
+          </div>
+        </template>
 
         <div class="result-actions">
           <button class="action-button primary-large" @click="downloadResult">
             <el-icon style="margin-right: 10px;"><Download /></el-icon>
-            下载带水印的PDF
+            {{ isBatch ? '下载 ZIP 压缩包' : '下载带水印的PDF' }}
           </button>
         </div>
       </div>
@@ -456,6 +449,7 @@ import {
 import LoadingOverlay from '../components/LoadingOverlay.vue'
 import PdfPreview from '../components/PdfPreview.vue'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
+import { CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import cMapUrl from 'pdfjs-dist/cmaps/UniGB-UTF8-H.bcmap?url'
@@ -464,10 +458,11 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 const cMapBaseUrl = cMapUrl.substring(0, cMapUrl.lastIndexOf('/') + 1)
 
 const fileInput = ref(null)
-const file = ref(null)
+const files = ref([])
 const isDragging = ref(false)
 const loading = ref(false)
 const result = ref(null)
+const isBatch = computed(() => result.value?.isBatch || false)
 
 const watermarkType = ref('text')
 const watermarkText = ref('CONFIDENTIAL')
@@ -486,14 +481,13 @@ const rotation = ref(0)
 const watermarkSpacingX = ref(1.0)
 const watermarkSpacingY = ref(1.0)
 
-const beforePreviewCanvas = ref(null)
 const beforeCompareCanvas = ref(null)
 const afterPreviewCanvas = ref(null)
 const previewPageRef = ref(null)
-const pdfDoc = ref(null)
+const pdfDocs = ref({})
+const totalPagesMap = ref({})
 const afterPdfDoc = ref(null)
-const totalPages = ref(0)
-const currentPage = ref(1)
+const compareTotalPages = ref(0)
 const comparePage = ref(1)
 
 const previewModalVisible = ref(false)
@@ -511,6 +505,7 @@ const hasChinese = computed(() => {
 })
 
 const canSubmit = computed(() => {
+  if (files.value.length === 0) return false
   if (watermarkType.value === 'image' && !watermarkImage.value) return false
   if (watermarkType.value === 'text' && !watermarkText.value.trim()) return false
   return true
@@ -616,264 +611,223 @@ const previewStyle = computed(() => {
     'bottom-right': { bottom: `${margin}px`, right: `${margin}px` }
   }
   
-  const result = { ...baseStyle, ...positions[position.value], position: 'absolute' }
-  
-  if (watermarkType.value === 'image' || hasChinese.value) {
-    result.width = `${wmSize.width}px`
-    result.height = `${wmSize.height}px`
-  }
-  
-  return result
+  return { ...baseStyle, ...positions[position.value], position: 'absolute' }
 })
 
 const tiledWatermarkList = computed(() => {
   if (!isTiledPosition.value) return []
   
-  const result = []
-  const baseStyle = getWatermarkBaseStyle()
-  const isFullTiled = position.value === 'full-tiled'
-  const rotateAngle = isFullTiled ? -45 : -30
-  
   const scale = previewScale.value
-  const actualSize = getWatermarkActualSize()
-  const wmWidth = actualSize.width
-  const wmHeight = actualSize.height
+  const baseStyle = getWatermarkBaseStyle()
+  const wmSize = getWatermarkPreviewSize()
+  const pageStyle = previewPageStyle.value
+  const pageW = parseInt(pageStyle.width)
+  const pageH = parseInt(pageStyle.height)
   
-  const spacingMulX = watermarkSpacingX.value
-  const spacingMulY = watermarkSpacingY.value
-  const baseSpacingX = isFullTiled ? wmWidth * 1.2 : wmWidth * 1.6
-  const baseSpacingY = isFullTiled ? wmHeight * 2.0 : wmHeight * 2.5
-  const spacingX = baseSpacingX * spacingMulX * scale
-  const spacingY = baseSpacingY * spacingMulY * scale
+  const isFullTiled = position.value === 'full-tiled'
+  const spacingXMultiplier = isFullTiled ? 1.2 : 1.6
+  const spacingYMultiplier = isFullTiled ? 2.0 : 2.5
+  const baseSpacingX = Math.max(wmSize.width * spacingXMultiplier * watermarkSpacingX.value, 80)
+  const baseSpacingY = Math.max(wmSize.height * spacingYMultiplier * watermarkSpacingY.value, 80)
   
-  const previewW = pdfPageWidth.value * scale
-  const previewH = pdfPageHeight.value * scale
+  const rotateAngle = isFullTiled ? -45 : -30
+  const cols = Math.ceil(pageW / baseSpacingX) + 4
+  const rows = Math.ceil(pageH / baseSpacingY) + 4
   
-  const cols = Math.ceil(previewW / spacingX) + 4
-  const rows = Math.ceil(previewH / spacingY) + 4
-  
-  const offsetStartX = isFullTiled ? wmWidth * 2 * scale : wmWidth * 1.5 * scale
-  const offsetStartY = wmHeight * 1.5 * scale
-  
+  const list = []
   for (let r = 0; r < rows; r++) {
     for (let c = 0; c < cols; c++) {
-      const offsetX = r % 2 === 0 ? 0 : spacingX / 2
-      const style = {
-        ...baseStyle,
-        position: 'absolute',
-        left: `${c * spacingX - offsetStartX + offsetX}px`,
-        top: `${r * spacingY - offsetStartY}px`,
-        transform: `rotate(${rotateAngle}deg)`,
-        transformOrigin: 'center center'
-      }
-      
-      if (watermarkType.value === 'image' || hasChinese.value) {
-        style.width = `${wmWidth * scale}px`
-        style.height = `${wmHeight * scale}px`
-      }
-      
-      result.push({ style })
+      const offsetX = r % 2 === 0 ? 0 : baseSpacingX / 2
+      const x = c * baseSpacingX - wmSize.width * 1.5 + offsetX
+      const y = r * baseSpacingY - wmSize.height * 1.5
+      list.push({
+        style: {
+          ...baseStyle,
+          position: 'absolute',
+          left: `${x}px`,
+          top: `${y}px`,
+          transform: `rotate(${rotateAngle}deg)`,
+          width: wmSize.width ? `${wmSize.width}px` : undefined,
+          height: wmSize.height ? `${wmSize.height}px` : undefined
+        }
+      })
     }
   }
-  
-  return result
+  return list
 })
 
-const computeFitScale = (page, containerWidth, containerHeight) => {
-  const viewport = page.getViewport({ scale: 1 })
-  const padding = 48
-  const availW = Math.max(containerWidth - padding, 50)
-  const availH = Math.max((containerHeight || 600) - padding, 50)
-  const scaleW = availW / viewport.width
-  const scaleH = availH / viewport.height
-  return Math.min(scaleW, scaleH)
+const getFileKey = (file) => {
+  return `${file.name}_${file.size}_${file.lastModified}`
 }
-
-const computeRenderScale = (page, containerWidth, containerHeight) => {
-  const fitScale = computeFitScale(page, containerWidth, containerHeight)
-  const dpr = window.devicePixelRatio || 1
-  return fitScale * dpr
-}
-
-const generateWatermarkImage = () => {
-  if (!hasChinese.value || !watermarkText.value.trim()) {
-    generatedWatermarkImage.value = null
-    return
-  }
-
-  const canvas = document.createElement('canvas')
-  const ctx = canvas.getContext('2d')
-  
-  const tempCanvas = document.createElement('canvas')
-  const tempCtx = tempCanvas.getContext('2d')
-  tempCtx.font = `${fontSize.value}px "Microsoft YaHei", "SimHei", sans-serif`
-  const textWidth = tempCtx.measureText(watermarkText.value).width
-  
-  const padding = 40
-  canvas.width = textWidth + padding * 2
-  canvas.height = fontSize.value + padding * 2
-  
-  ctx.clearRect(0, 0, canvas.width, canvas.height)
-  
-  ctx.font = `${fontSize.value}px "Microsoft YaHei", "SimHei", sans-serif`
-  ctx.fillStyle = fontColor.value
-  ctx.globalAlpha = 1
-  ctx.textBaseline = 'middle'
-  ctx.textAlign = 'center'
-  ctx.fillText(watermarkText.value, canvas.width / 2, canvas.height / 2)
-  
-  const dataUrl = canvas.toDataURL('image/png')
-  
-  watermarkImageWidth.value = canvas.width
-  watermarkImageHeight.value = canvas.height
-  
-  fetch(dataUrl)
-    .then(res => res.blob())
-    .then(blob => {
-      generatedWatermarkImage.value = new File([blob], 'chinese-watermark.png', { type: 'image/png' })
-      watermarkImagePreview.value = dataUrl
-    })
-}
-
-watch([watermarkText, fontSize, fontColor], () => {
-  if (watermarkType.value === 'text' && hasChinese.value) {
-    generateWatermarkImage()
-  }
-}, { immediate: true })
-
-watch(watermarkType, () => {
-  if (watermarkType.value === 'text' && hasChinese.value) {
-    generateWatermarkImage()
-  } else {
-    generatedWatermarkImage.value = null
-  }
-})
 
 const triggerFileInput = () => {
   fileInput.value.click()
 }
 
-const handleFileSelect = async (e) => {
-  const selectedFile = e.target.files[0]
-  if (selectedFile && selectedFile.type === 'application/pdf') {
-    file.value = selectedFile
+const isFileDuplicate = (newFile) => {
+  return files.value.some(
+    f => f.name === newFile.name && f.size === newFile.size && f.lastModified === newFile.lastModified
+  )
+}
+
+const addFiles = (fileList) => {
+  let addedCount = 0
+  for (let i = 0; i < fileList.length; i++) {
+    const f = fileList[i]
+    if (f && f.type === 'application/pdf') {
+      if (!isFileDuplicate(f)) {
+        files.value.push(f)
+        loadPdfInfo(f)
+        addedCount++
+      }
+    } else if (f) {
+      ElMessage.warning(`文件 "${f.name}" 不是PDF格式，已跳过`)
+    }
+  }
+  if (addedCount > 0) {
     result.value = null
-    await loadPdfForPreview(selectedFile)
+  }
+  return addedCount
+}
+
+const loadPdfInfo = async (file) => {
+  try {
+    const arrayBuffer = await file.arrayBuffer()
+    const pdfDoc = await pdfjsLib.getDocument({
+      data: arrayBuffer,
+      cMapUrl: cMapBaseUrl,
+      cMapPacked: true
+    }).promise
+    pdfDocs.value[file.name] = pdfDoc
+    totalPagesMap.value[file.name] = pdfDoc.numPages
+    if (pdfDoc.numPages > 0) {
+      const page = await pdfDoc.getPage(1)
+      const viewport = page.getViewport({ scale: 1 })
+      pdfPageWidth.value = viewport.width
+      pdfPageHeight.value = viewport.height
+    }
+  } catch (e) {
+    console.error('Failed to load PDF info:', e)
+  }
+}
+
+const handleFileSelect = (e) => {
+  const selectedFiles = e.target.files
+  if (selectedFiles && selectedFiles.length > 0) {
+    addFiles(selectedFiles)
   }
   e.target.value = ''
 }
 
-const handleDrop = async (e) => {
+const handleDrop = (e) => {
   isDragging.value = false
-  const droppedFile = e.dataTransfer.files[0]
-  if (droppedFile && droppedFile.type === 'application/pdf') {
-    file.value = droppedFile
-    result.value = null
-    await loadPdfForPreview(droppedFile)
+  const droppedFiles = e.dataTransfer.files
+  if (droppedFiles && droppedFiles.length > 0) {
+    const addedCount = addFiles(droppedFiles)
+    if (addedCount === 0) {
+      ElMessage.warning('请拖入PDF文件')
+    }
   } else {
     ElMessage.warning('请拖入PDF文件')
   }
 }
 
-const waitForCanvasReady = async (canvasRef, maxAttempts = 20, interval = 60) => {
-  for (let i = 0; i < maxAttempts; i++) {
-    const canvas = canvasRef.value
-    if (canvas && canvas.parentElement && canvas.parentElement.clientWidth > 0) {
-      return true
-    }
-    await nextTick()
-    await new Promise(resolve => setTimeout(resolve, interval))
-  }
-  return false
+const removeFile = (index) => {
+  const file = files.value[index]
+  delete pdfDocs.value[file.name]
+  delete totalPagesMap.value[file.name]
+  files.value.splice(index, 1)
+  result.value = null
 }
 
-const loadPdfForPreview = async (pdfFile) => {
-  try {
-    const arrayBuffer = await pdfFile.arrayBuffer()
-    pdfDoc.value = await pdfjsLib.getDocument({
-      data: arrayBuffer,
-      cMapUrl: cMapBaseUrl,
-      cMapPacked: true
-    }).promise
-    totalPages.value = pdfDoc.value.numPages
-    currentPage.value = 1
-    comparePage.value = 1
-
-    const firstPage = await pdfDoc.value.getPage(1)
-    const viewport = firstPage.getViewport({ scale: 1 })
-    pdfPageWidth.value = viewport.width
-    pdfPageHeight.value = viewport.height
-
-    await nextTick()
-    const ready = await waitForCanvasReady(beforePreviewCanvas)
-    if (!ready) {
-      console.warn('[loadPdfForPreview] beforePreviewCanvas not ready after max attempts')
-    }
-
-    await renderPreviewPage('before', 1)
-  } catch (error) {
-    console.error('Failed to load PDF for preview:', error)
+const handleWatermarkImageSelect = (uploadFile) => {
+  const file = uploadFile.raw || uploadFile
+  if (!file) return
+  
+  if (!['image/jpeg', 'image/png', 'image/jpg'].includes(file.type)) {
+    ElMessage.warning('仅支持 JPG 和 PNG 格式图片')
+    return
   }
+  
+  watermarkImage.value = file
+  watermarkImagePreview.value = URL.createObjectURL(file)
+  
+  const img = new Image()
+  img.onload = () => {
+    watermarkImageWidth.value = img.width
+    watermarkImageHeight.value = img.height
+  }
+  img.src = watermarkImagePreview.value
+}
+
+const generateChineseWatermarkImage = async () => {
+  const canvas = document.createElement('canvas')
+  const fontSizeNum = fontSize.value
+  const text = watermarkText.value
+  
+  canvas.width = Math.max(text.length * fontSizeNum * 1.2, 100)
+  canvas.height = fontSizeNum * 1.5
+  
+  const ctx = canvas.getContext('2d')
+  ctx.font = `${fontSizeNum}px sans-serif`
+  ctx.fillStyle = fontColor.value
+  ctx.textBaseline = 'middle'
+  ctx.fillText(text, 10, canvas.height / 2)
+  
+  return new Promise((resolve) => {
+    canvas.toBlob((blob) => {
+      if (blob) {
+        const file = new File([blob], 'chinese_watermark.png', { type: 'image/png' })
+        resolve(file)
+      } else {
+        resolve(null)
+      }
+    }, 'image/png')
+  })
 }
 
 const loadAfterPdfForPreview = async (downloadUrl) => {
   try {
     const response = await fetch(downloadUrl)
-    if (!response.ok) {
-      throw new Error(`HTTP ${response.status}: ${response.statusText}`)
-    }
     const arrayBuffer = await response.arrayBuffer()
     afterPdfDoc.value = await pdfjsLib.getDocument({
       data: arrayBuffer,
       cMapUrl: cMapBaseUrl,
       cMapPacked: true
     }).promise
+    compareTotalPages.value = afterPdfDoc.value.numPages
     comparePage.value = 1
-
-    const beforeReady = await waitForCanvasReady(beforeCompareCanvas)
-    const afterReady = await waitForCanvasReady(afterPreviewCanvas)
-    
-    if (!beforeReady) {
-      console.warn('[loadAfterPdfForPreview] beforeCompareCanvas not ready')
-    }
-    if (!afterReady) {
-      console.warn('[loadAfterPdfForPreview] afterPreviewCanvas not ready')
-    }
-
+    await nextTick()
     await renderComparePages(1)
   } catch (error) {
     console.error('Failed to load processed PDF for preview:', error)
-    ElMessage.error('处理后预览加载失败：' + error.message)
   }
 }
 
-watch(result, async (newResult) => {
-  if (newResult?.downloadUrl) {
-    await nextTick()
-    await nextTick()
-    await loadAfterPdfForPreview(newResult.downloadUrl)
-  }
-})
+const computeFitScale = (page, containerWidth, containerHeight) => {
+  const viewport = page.getViewport({ scale: 1 })
+  const padding = 40
+  const availW = Math.max(containerWidth - padding, 50)
+  const availH = Math.max((containerHeight || 500) - padding, 50)
+  const scaleW = availW / viewport.width
+  const scaleH = availH / viewport.height
+  return Math.min(scaleW, scaleH)
+}
 
 const renderPreviewPage = async (type, pageNum) => {
   let canvas = null
   let doc = null
 
-  if (type === 'before') {
-    canvas = beforePreviewCanvas.value
-    doc = pdfDoc.value
-  } else if (type === 'before-compare') {
+  if (type === 'before-compare') {
     canvas = beforeCompareCanvas.value
-    doc = pdfDoc.value
+    doc = files.value.length > 0 ? pdfDocs.value[files.value[0].name] : null
   } else if (type === 'after') {
     canvas = afterPreviewCanvas.value
     doc = afterPdfDoc.value
   }
 
-  if (!canvas || !doc) {
-    console.warn(`[renderPreviewPage] type=${type} canvas or doc missing`, { hasCanvas: !!canvas, hasDoc: !!doc })
-    return
-  }
+  if (!canvas || !doc) return
+  if (pageNum < 1 || pageNum > doc.numPages) return
 
   try {
     const page = await doc.getPage(pageNum)
@@ -883,7 +837,8 @@ const renderPreviewPage = async (type, pageNum) => {
 
     const rawViewport = page.getViewport({ scale: 1 })
     const fitScale = computeFitScale(page, containerWidth, containerHeight)
-    const renderScale = computeRenderScale(page, containerWidth, containerHeight)
+    const dpr = window.devicePixelRatio || 1
+    const renderScale = fitScale * dpr
     const viewport = page.getViewport({ scale: renderScale })
     const context = canvas.getContext('2d')
 
@@ -916,70 +871,50 @@ const renderComparePages = async (pageNum) => {
   await renderPreviewPage('after', pageNum)
 }
 
-const handleWatermarkImageSelect = (uploadFile) => {
-  watermarkImage.value = uploadFile.raw
-  const reader = new FileReader()
-  reader.onload = (e) => {
-    watermarkImagePreview.value = e.target.result
-    const img = new Image()
-    img.onload = () => {
-      watermarkImageWidth.value = img.width
-      watermarkImageHeight.value = img.height
-    }
-    img.src = e.target.result
-  }
-  reader.readAsDataURL(uploadFile.raw)
-}
-
-const removeFile = () => {
-  file.value = null
-  result.value = null
-  pdfDoc.value = null
-  afterPdfDoc.value = null
-  totalPages.value = 0
-}
-
 const addWatermark = async () => {
-  if (!file.value) {
+  if (!files.value || files.value.length === 0) {
     ElMessage.warning('请上传PDF文件')
     return
   }
-
   if (!canSubmit.value) {
-    ElMessage.warning('请完善水印设置')
+    ElMessage.warning(watermarkType.value === 'image' ? '请选择水印图片' : '请输入水印文字')
     return
-  }
-
-  let uploadWatermarkImage = watermarkImage.value
-  if (watermarkType.value === 'text' && hasChinese.value) {
-    if (!generatedWatermarkImage.value) {
-      generateWatermarkImage()
-      await new Promise(resolve => setTimeout(resolve, 500))
-    }
-    uploadWatermarkImage = generatedWatermarkImage.value
-  }
-
-  const options = {
-    type: watermarkType.value,
-    text: watermarkText.value,
-    fontFamily: fontFamily.value,
-    fontSize: fontSize.value,
-    color: fontColor.value,
-    opacity: opacity.value,
-    position: position.value,
-    rotation: rotation.value,
-    imageScale: hasChinese.value ? 1.0 : imageScale.value,
-    watermarkSpacingX: watermarkSpacingX.value,
-    watermarkSpacingY: watermarkSpacingY.value
   }
 
   loading.value = true
   result.value = null
 
   try {
-    const response = await addWatermarkApi(file.value, uploadWatermarkImage, options)
+    let watermarkImgToSend = watermarkImage.value
+    
+    if (watermarkType.value === 'text' && hasChinese.value) {
+      watermarkImgToSend = await generateChineseWatermarkImage()
+      if (!watermarkImgToSend) {
+        throw new Error('生成中文水印图片失败')
+      }
+    }
+
+    const options = {
+      type: watermarkType.value,
+      text: watermarkText.value,
+      fontSize: fontSize.value,
+      color: fontColor.value,
+      opacity: opacity.value,
+      position: position.value,
+      rotation: rotation.value,
+      fontFamily: fontFamily.value,
+      imageScale: imageScale.value,
+      watermarkSpacingX: watermarkSpacingX.value,
+      watermarkSpacingY: watermarkSpacingY.value
+    }
+
+    const response = await addWatermarkApi(files.value, watermarkImgToSend, options)
     result.value = response.data
     ElMessage.success('水印添加成功！')
+    
+    if (!result.value.isBatch) {
+      await loadAfterPdfForPreview(response.data.downloadUrl)
+    }
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '添加水印失败，请重试')
   } finally {
@@ -989,7 +924,11 @@ const addWatermark = async () => {
 
 const downloadResult = () => {
   if (result.value) {
-    downloadFile(result.value.downloadUrl, `watermarked_${Date.now()}.pdf`)
+    if (result.value.isBatch) {
+      downloadFile(result.value.downloadUrl, `watermarked_batch_${Date.now()}.zip`)
+    } else {
+      downloadFile(result.value.downloadUrl, `watermarked_${Date.now()}.pdf`)
+    }
   }
 }
 
@@ -998,132 +937,126 @@ const openPreviewModal = (src, title) => {
   previewModalTitle.value = title || 'PDF预览'
   previewModalVisible.value = true
 }
+
+watch(watermarkType, () => {
+  result.value = null
+})
 </script>
 
 <style scoped>
 .upload-section {
-  margin-bottom: 32px;
+  margin-bottom: 24px;
 }
 
 .upload-icon-wrapper {
-  width: 96px;
-  height: 96px;
-  margin: 0 auto 20px;
-  background: linear-gradient(135deg, #667eea20 0%, #764ba220 100%);
-  border-radius: 24px;
-  display: flex;
-  align-items: center;
-  justify-content: center;
+  margin-bottom: 12px;
 }
 
 .upload-title {
   font-size: 18px;
-  font-weight: 600;
   color: #333;
-  margin-bottom: 8px;
+  margin: 0 0 4px 0;
 }
 
 .upload-hint {
   font-size: 14px;
   color: #999;
+  margin: 0;
+}
+
+.file-list {
+  margin-top: 20px;
 }
 
 .selected-file-card {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 20px;
-  background: linear-gradient(135deg, #667eea10 0%, #764ba210 100%);
+  padding: 16px;
+  background: #f8f9fa;
   border-radius: 12px;
-  border: 1px solid #667eea25;
+  margin-bottom: 12px;
+  border: 1px solid #e9ecef;
+  transition: all 0.2s;
+}
+
+.selected-file-card:hover {
+  background: #f0f5ff;
+  border-color: #d6e4ff;
 }
 
 .file-info-wrapper {
   display: flex;
   align-items: center;
-  gap: 20px;
+  gap: 16px;
+  flex: 1;
 }
 
 .file-thumbnail {
-  border-radius: 8px;
+  border: 1px solid #ddd;
+  border-radius: 6px;
   overflow: hidden;
-  flex-shrink: 0;
+  background: white;
+  cursor: pointer;
 }
 
 .file-details {
-  display: flex;
-  flex-direction: column;
-  gap: 8px;
+  flex: 1;
 }
 
 .file-name {
-  font-size: 16px;
   font-weight: 600;
-  color: #1a1a2e;
-  max-width: 400px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  color: #333;
+  font-size: 15px;
+  margin-bottom: 6px;
 }
 
 .file-meta {
   display: flex;
   align-items: center;
   gap: 16px;
+  margin-bottom: 8px;
+}
+
+.file-size, .file-pages {
+  display: flex;
+  align-items: center;
+  gap: 4px;
   color: #666;
   font-size: 13px;
 }
 
-.file-meta span {
-  display: inline-flex;
-  align-items: center;
-  gap: 4px;
-}
-
 .file-status {
   display: flex;
-  align-items: center;
 }
 
 .remove-btn {
-  display: flex;
-  align-items: center;
-  gap: 4px;
+  margin-left: 12px;
 }
 
 .settings-container {
-  display: flex;
-  flex-direction: column;
-  gap: 24px;
+  border-top: 1px solid #eee;
+  padding-top: 24px;
 }
 
 .settings-section {
-  background: #fafbfc;
-  border-radius: 12px;
-  border: 1px solid #eef0f3;
-  overflow: hidden;
+  margin-bottom: 28px;
 }
 
 .section-header {
   display: flex;
   align-items: center;
   justify-content: space-between;
-  padding: 16px 20px;
-  background: white;
-  border-bottom: 1px solid #eef0f3;
+  margin-bottom: 16px;
 }
 
 .section-title {
   display: flex;
   align-items: center;
   gap: 8px;
-  font-size: 15px;
+  font-size: 16px;
   font-weight: 600;
-  color: #1a1a2e;
-}
-
-.section-title .el-icon {
-  font-size: 18px;
+  color: #333;
 }
 
 .section-hint {
@@ -1132,11 +1065,11 @@ const openPreviewModal = (src, title) => {
 }
 
 .section-content {
-  padding: 20px;
+  padding: 0 8px;
 }
 
 .type-radio-group {
-  --el-radio-button-bg-color: white;
+  display: flex;
 }
 
 .setting-control {
@@ -1144,7 +1077,6 @@ const openPreviewModal = (src, title) => {
   display: flex;
   flex-direction: column;
   gap: 8px;
-  min-width: 300px;
 }
 
 .setting-control-inline {
@@ -1153,74 +1085,64 @@ const openPreviewModal = (src, title) => {
   gap: 12px;
 }
 
-.control-select {
-  width: 280px;
-}
-
-.control-select-sm {
-  width: 160px;
-}
-
-.control-slider {
-  width: 280px;
-}
-
 .control-unit {
   color: #666;
   font-size: 14px;
 }
 
-.color-value {
-  font-family: 'SF Mono', Monaco, monospace;
-  font-size: 13px;
-  color: #666;
-  background: #f5f5f5;
-  padding: 4px 10px;
-  border-radius: 4px;
+.control-select {
+  width: 200px;
+}
+
+.control-select-sm {
+  width: 140px;
+}
+
+.control-slider {
+  width: 240px;
 }
 
 .scale-tag {
   min-width: 60px;
-  justify-content: center;
+  text-align: center;
+}
+
+.color-value {
+  color: #666;
+  font-size: 14px;
+  font-family: monospace;
 }
 
 .chinese-warning {
   display: flex;
   align-items: center;
   gap: 6px;
-  padding: 8px 12px;
-  background: #fdf6ec;
-  border: 1px solid #faecd8;
-  border-radius: 6px;
   font-size: 13px;
   color: #e6a23c;
-}
-
-.chinese-warning .el-icon {
-  flex-shrink: 0;
+  padding: 8px 12px;
+  background: #fdf6ec;
+  border-radius: 6px;
 }
 
 .image-info {
   display: flex;
   align-items: center;
   gap: 12px;
-  margin-top: 8px;
-  padding: 12px;
-  background: white;
-  border: 1px solid #eef0f3;
-  border-radius: 8px;
+  padding: 8px 12px;
+  background: #f5f7fa;
+  border-radius: 6px;
 }
 
 .image-preview-thumb {
-  width: 60px;
-  height: 60px;
+  width: 50px;
+  height: 50px;
   border-radius: 6px;
   overflow: hidden;
-  background: #f5f5f5;
+  background: white;
+  border: 1px solid #ddd;
   display: flex;
   align-items: center;
   justify-content: center;
-  flex-shrink: 0;
 }
 
 .image-preview-thumb img {
@@ -1232,81 +1154,71 @@ const openPreviewModal = (src, title) => {
 .image-details {
   display: flex;
   flex-direction: column;
-  gap: 4px;
+  gap: 2px;
 }
 
 .image-name {
-  font-size: 14px;
   font-weight: 500;
   color: #333;
-  max-width: 250px;
-  overflow: hidden;
-  text-overflow: ellipsis;
-  white-space: nowrap;
+  font-size: 14px;
 }
 
 .image-size {
-  font-size: 12px;
   color: #999;
+  font-size: 12px;
 }
 
 .preview-section-card {
-  background: linear-gradient(135deg, #f8f9ff 0%, #fdf8ff 100%);
+  background: #fafbfc;
+  padding: 20px;
+  border-radius: 12px;
+  border: 1px solid #eef0f2;
 }
 
 .watermark-preview-wrapper {
   display: flex;
   justify-content: center;
-  align-items: center;
-  min-height: 350px;
   padding: 20px;
 }
 
 .preview-page {
-  background: white;
-  border: 1px solid #e4e7ed;
-  border-radius: 4px;
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08);
   position: relative;
+  background: white;
+  border: 1px solid #d9d9d9;
+  box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
   overflow: hidden;
-  box-sizing: border-box;
 }
 
 .page-lines {
+  position: absolute;
+  top: 40px;
+  left: 40px;
+  right: 40px;
+  bottom: 40px;
   display: flex;
   flex-direction: column;
-  gap: 18px;
-  height: 100%;
-  padding: 30px;
-  box-sizing: border-box;
+  justify-content: space-between;
 }
 
 .page-line {
-  height: 8px;
-  background: linear-gradient(90deg, #eef0f3 0%, #eef0f350 100%);
-  border-radius: 4px;
+  height: 1px;
+  background: #e8e8e8;
 }
 
-.page-line:nth-child(1) { width: 60%; }
-.page-line:nth-child(2) { width: 90%; }
-.page-line:nth-child(3) { width: 75%; }
-.page-line:nth-child(4) { width: 85%; }
-.page-line:nth-child(5) { width: 70%; }
-.page-line:nth-child(6) { width: 95%; }
-.page-line:nth-child(7) { width: 65%; }
-.page-line:nth-child(8) { width: 80%; }
-
 .watermark-layer {
-  position: absolute;
-  pointer-events: none;
+  z-index: 10;
   user-select: none;
+  pointer-events: none;
+}
+
+.tiled-watermark {
+  white-space: nowrap;
 }
 
 .watermark-img {
-  width: 100%;
-  height: 100%;
+  max-width: 100%;
+  max-height: 100%;
   object-fit: contain;
-  display: block;
 }
 
 .watermark-placeholder {
@@ -1317,89 +1229,36 @@ const openPreviewModal = (src, title) => {
   display: flex;
   flex-direction: column;
   align-items: center;
-  justify-content: center;
   gap: 8px;
-  color: #bbb;
-  font-size: 14px;
-}
-
-.watermark-placeholder .el-icon {
-  font-size: 48px;
+  color: #ccc;
 }
 
 .action-section {
-  display: flex;
-  flex-direction: column;
-  align-items: center;
-  padding: 8px 0 0;
+  margin-top: 32px;
+  padding-top: 24px;
+  border-top: 1px solid #eee;
 }
 
 .action-tip {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
   margin-bottom: 16px;
-  padding: 10px 20px;
-  background: #fdf6ec;
-  border-radius: 8px;
-  border: 1px solid #faecd8;
   font-size: 14px;
-  color: #e6a23c;
 }
 
 .primary-large {
-  padding: 16px 48px;
-  font-size: 16px;
-}
-
-.original-preview-section {
-  margin-top: 32px;
-  padding-top: 24px;
-  border-top: 1px solid #eef0f3;
-}
-
-.original-preview-section .section-header {
-  padding: 0 0 16px 0;
-  background: transparent;
-  border-bottom: none;
-  margin-bottom: 16px;
-}
-
-.pdf-preview-container {
-  background: #f5f5f5;
-  border: 1px solid #e4e7ed;
-  border-radius: 12px;
-  overflow: auto;
-  max-height: 560px;
-  min-height: 420px;
-  display: flex;
-  justify-content: center;
-  align-items: flex-start;
-  padding: 24px;
-  box-sizing: border-box;
-}
-
-.preview-canvas {
-  box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12);
-  background: white;
-  max-width: 100%;
+  width: 100%;
+  max-width: 400px;
+  margin: 0 auto;
   display: block;
-  border-radius: 4px;
-  flex-shrink: 0;
-}
-
-.page-navigation {
-  display: flex;
-  justify-content: center;
-  align-items: center;
-  margin-top: 20px;
-  gap: 12px;
 }
 
 .result-section {
   margin-top: 32px;
   padding-top: 24px;
-  border-top: 1px solid #eef0f3;
+  border-top: 1px solid #eee;
 }
 
 .result-success-banner {
@@ -1407,155 +1266,162 @@ const openPreviewModal = (src, title) => {
   align-items: center;
   gap: 16px;
   padding: 20px 24px;
-  background: linear-gradient(135deg, #f0f9eb 0%, #67c23a10 100%);
-  border: 1px solid #67c23a30;
+  background: linear-gradient(135deg, #f0f9eb 0%, #e1f3d8 100%);
   border-radius: 12px;
+  border: 1px solid #e1f3d8;
   margin-bottom: 24px;
 }
 
 .success-icon {
-  width: 56px;
-  height: 56px;
-  background: white;
-  border-radius: 50%;
-  display: flex;
-  align-items: center;
-  justify-content: center;
   color: #67c23a;
-  box-shadow: 0 4px 12px rgba(103, 194, 58, 0.2);
   flex-shrink: 0;
 }
 
 .success-info h3 {
-  font-size: 18px;
-  font-weight: 600;
+  margin: 0 0 8px 0;
   color: #67c23a;
-  margin-bottom: 6px;
+  font-size: 20px;
 }
 
 .success-meta {
   display: flex;
   align-items: center;
-  gap: 16px;
-  color: #529b2e;
-  font-size: 13px;
+  gap: 20px;
+  flex-wrap: wrap;
+  color: #666;
+  font-size: 14px;
 }
 
 .success-meta span {
-  display: inline-flex;
+  display: flex;
   align-items: center;
-  gap: 4px;
+  gap: 6px;
+}
+
+.batch-result-list {
+  margin-bottom: 24px;
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.batch-result-item {
+  display: flex;
+  align-items: flex-start;
+  gap: 12px;
+  padding: 14px 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid #e9ecef;
+  transition: all 0.2s;
+}
+
+.batch-result-item:hover {
+  background: #f0f5ff;
+  border-color: #d6e4ff;
+}
+
+.batch-item-icon {
+  flex-shrink: 0;
+  margin-top: 2px;
+}
+
+.batch-item-info {
+  flex: 1;
+}
+
+.batch-item-name {
+  font-weight: 500;
+  color: #333;
+  margin-bottom: 4px;
+}
+
+.batch-item-size {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  color: #666;
+  font-size: 13px;
+}
+
+.batch-item-error {
+  color: #f56c6c;
+  font-size: 13px;
 }
 
 .preview-comparison {
   display: grid;
   grid-template-columns: 1fr 1fr;
   gap: 24px;
+  margin: 24px 0;
 }
 
 .preview-column {
-  display: flex;
-  flex-direction: column;
+  text-align: center;
 }
 
 .column-header {
   display: flex;
   align-items: center;
+  justify-content: center;
   gap: 6px;
-  padding: 10px 16px;
-  border-radius: 8px 8px 0 0;
   font-size: 14px;
   font-weight: 600;
-  margin-bottom: 0;
+  margin-bottom: 12px;
 }
 
 .column-header.before {
-  background: #f5f5f5;
-  color: #666;
+  color: #999;
 }
 
 .column-header.after {
-  background: linear-gradient(135deg, #667eea15 0%, #764ba215 100%);
-  color: #667eea;
+  color: #67c23a;
+}
+
+.pdf-preview-container {
+  background: #f5f5f5;
+  border: 1px solid #ddd;
+  border-radius: 8px;
+  overflow: auto;
+  max-height: 500px;
+  display: flex;
+  justify-content: center;
+  align-items: flex-start;
+  padding: 20px;
+}
+
+.preview-canvas {
+  box-shadow: 0 2px 8px rgba(0, 0, 0, 0.15);
+  background: white;
+  max-width: 100%;
+}
+
+.page-navigation {
+  display: flex;
+  justify-content: center;
+  align-items: center;
+  margin-top: 16px;
+  gap: 12px;
 }
 
 .result-actions {
   text-align: center;
-  margin-top: 24px 0 8px;
-}
-
-@media (max-width: 900px) {
-  .preview-page {
-    width: 100%;
-    height: 280px;
-  }
-
-  .preview-comparison {
-    grid-template-columns: 1fr;
-  }
+  margin-top: 24px;
 }
 
 @media (max-width: 768px) {
+  .preview-comparison {
+    grid-template-columns: 1fr;
+  }
+  
   .selected-file-card {
     flex-direction: column;
-    gap: 16px;
     align-items: flex-start;
   }
-
-  .file-info-wrapper {
-    flex-direction: column;
-    align-items: flex-start;
-  }
-
-  .file-name {
-    max-width: 100%;
-  }
-
-  .section-content {
-    padding: 16px;
-  }
-
+  
   .setting-row {
     flex-direction: column;
     align-items: flex-start;
-    gap: 12px;
-  }
-
-  .setting-control,
-  .setting-control-inline {
-    width: 100%;
-  }
-
-  .control-select,
-  .control-slider {
-    width: 100%;
-  }
-
-  .control-select-sm {
-    width: 100%;
-  }
-
-  .setting-label {
-    min-width: auto;
-  }
-
-  .preview-page {
-    height: 240px;
-    padding: 20px;
-  }
-
-  .page-lines {
-    gap: 14px;
-  }
-
-  .primary-large {
-    width: 100%;
-    padding: 14px 24px;
-  }
-
-  .success-banner {
-    flex-direction: column;
-    text-align: center;
   }
 }
 </style>

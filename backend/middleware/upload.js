@@ -25,7 +25,7 @@ const fileFilter = (req, file, cb) => {
   const fieldName = file.fieldname;
   let allowedMimeTypes = [];
   
-  if (fieldName === 'pdf' || fieldName === 'files') {
+  if (fieldName === 'pdf' || fieldName === 'pdfs' || fieldName === 'files') {
     allowedMimeTypes = allowedTypes.pdf;
   } else if (fieldName === 'images' || fieldName === 'watermarkImage') {
     allowedMimeTypes = allowedTypes.image;

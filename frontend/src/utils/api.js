@@ -33,9 +33,9 @@ export const mergePDF = (files, order) => {
   })
 }
 
-export const splitPDF = (file, options) => {
+export const splitPDF = (files, options) => {
   const formData = new FormData()
-  formData.append('pdf', file)
+  files.forEach(file => formData.append('pdfs', file))
   Object.keys(options).forEach(key => {
     if (options[key] !== undefined && options[key] !== null) {
       formData.append(key, options[key])
@@ -46,18 +46,18 @@ export const splitPDF = (file, options) => {
   })
 }
 
-export const compressPDF = (file, level) => {
+export const compressPDF = (files, level) => {
   const formData = new FormData()
-  formData.append('pdf', file)
+  files.forEach(file => formData.append('pdfs', file))
   formData.append('level', level)
   return api.post('/compress', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
 
-export const pdfToImage = (file, options) => {
+export const pdfToImage = (files, options) => {
   const formData = new FormData()
-  formData.append('pdf', file)
+  files.forEach(file => formData.append('pdfs', file))
   Object.keys(options).forEach(key => {
     if (options[key] !== undefined && options[key] !== null) {
       formData.append(key, options[key])
@@ -81,9 +81,22 @@ export const imageToPDF = (files, options) => {
   })
 }
 
-export const addWatermark = (pdfFile, watermarkImageFile, options) => {
+export const imageToPDFBatch = (files, options) => {
   const formData = new FormData()
-  formData.append('pdf', pdfFile)
+  files.forEach(file => formData.append('images', file))
+  Object.keys(options).forEach(key => {
+    if (options[key] !== undefined && options[key] !== null) {
+      formData.append(key, options[key])
+    }
+  })
+  return api.post('/from-image/batch', formData, {
+    headers: { 'Content-Type': 'multipart/form-data' }
+  })
+}
+
+export const addWatermark = (pdfFiles, watermarkImageFile, options) => {
+  const formData = new FormData()
+  pdfFiles.forEach(file => formData.append('pdfs', file))
   if (watermarkImageFile) {
     formData.append('watermarkImage', watermarkImageFile)
   }
@@ -97,18 +110,18 @@ export const addWatermark = (pdfFile, watermarkImageFile, options) => {
   })
 }
 
-export const deletePages = (file, pagesToDelete) => {
+export const deletePages = (files, pagesToDelete) => {
   const formData = new FormData()
-  formData.append('pdf', file)
+  files.forEach(file => formData.append('pdfs', file))
   formData.append('pagesToDelete', pagesToDelete)
   return api.post('/pages/delete', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
 
-export const rotatePages = (file, pagesToRotate, rotation) => {
+export const rotatePages = (files, pagesToRotate, rotation) => {
   const formData = new FormData()
-  formData.append('pdf', file)
+  files.forEach(file => formData.append('pdfs', file))
   formData.append('pagesToRotate', pagesToRotate)
   formData.append('rotation', rotation)
   return api.post('/pages/rotate', formData, {
@@ -116,18 +129,18 @@ export const rotatePages = (file, pagesToRotate, rotation) => {
   })
 }
 
-export const extractPages = (file, pagesToExtract) => {
+export const extractPages = (files, pagesToExtract) => {
   const formData = new FormData()
-  formData.append('pdf', file)
+  files.forEach(file => formData.append('pdfs', file))
   formData.append('pagesToExtract', pagesToExtract)
   return api.post('/pages/extract', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }
   })
 }
 
-export const reorderPages = (file, newOrder) => {
+export const reorderPages = (files, newOrder) => {
   const formData = new FormData()
-  formData.append('pdf', file)
+  files.forEach(file => formData.append('pdfs', file))
   formData.append('newOrder', JSON.stringify(newOrder))
   return api.post('/pages/reorder', formData, {
     headers: { 'Content-Type': 'multipart/form-data' }

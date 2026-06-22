@@ -146,98 +146,189 @@ const getCharPattern = (char, fontSize) => {
   return scaled;
 };
 
-router.post('/', upload.single('pdf'), async (req, res) => {
+const convertSinglePDFToImages = async (file, options) => {
+  const { format = 'png', pageMode = 'all', specificPages, dpi = 150 } = options;
+  const pdfBytes = fs.readFileSync(file.path);
+  const pdf = await PDFDocument.load(pdfBytes);
+  const totalPages = pdf.getPageCount();
+
+  let pagesToConvert = [];
+  if (pageMode === 'all') {
+    pagesToConvert = Array.from({ length: totalPages }, (_, i) => i);
+  } else if (pageMode === 'specific' && specificPages) {
+    pagesToConvert = specificPages.split(',').map(p => parseInt(p.trim()) - 1).filter(p => p >= 0 && p < totalPages);
+  }
+
+  if (pagesToConvert.length === 0) {
+    throw new Error('No pages to convert');
+  }
+
+  const baseName = path.basename(file.originalname, path.extname(file.originalname));
+  const sessionId = uuidv4();
+  const sessionDir = path.join(outputDir, sessionId);
+  fs.ensureDirSync(sessionDir);
+
+  const convertedFiles = [];
+  const scale = Math.min(Math.max(dpi / 72, 1), 3);
+
+  for (const pageIdx of pagesToConvert) {
+    const page = pdf.getPage(pageIdx);
+    const pageSize = page.getSize();
+    const width = Math.min(Math.round(pageSize.width * scale), 1200);
+    const height = Math.min(Math.round(pageSize.height * scale), 1600);
+
+    const outputFileName = `${baseName}_page_${pageIdx + 1}.${format.toLowerCase()}`;
+    const outputPath = path.join(sessionDir, outputFileName);
+
+    const imageBuffer = createImageBuffer(width, height, pageIdx + 1, format);
+    fs.writeFileSync(outputPath, imageBuffer);
+
+    convertedFiles.push({
+      name: outputFileName,
+      path: outputPath,
+      size: fs.statSync(outputPath).size
+    });
+  }
+
+  return {
+    originalName: file.originalname,
+    baseName,
+    sessionId,
+    sessionDir,
+    convertedFiles,
+    format,
+    totalPages
+  };
+};
+
+router.post('/', upload.array('pdfs', 20), async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Please upload a PDF file' });
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'Please upload at least one PDF file' });
     }
 
     const { format = 'png', pageMode = 'all', specificPages, dpi = 150 } = req.body;
-    const pdfBytes = fs.readFileSync(req.file.path);
-    const pdf = await PDFDocument.load(pdfBytes);
-    const totalPages = pdf.getPageCount();
+    const files = req.files;
+    const options = { format, pageMode, specificPages, dpi };
 
-    let pagesToConvert = [];
-    if (pageMode === 'all') {
-      pagesToConvert = Array.from({ length: totalPages }, (_, i) => i);
-    } else if (pageMode === 'specific' && specificPages) {
-      pagesToConvert = specificPages.split(',').map(p => parseInt(p.trim()) - 1).filter(p => p >= 0 && p < totalPages);
+    const batchSessionId = uuidv4();
+    const allConvertedFiles = [];
+    const results = [];
+    const tempDirs = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const result = await convertSinglePDFToImages(file, options);
+        tempDirs.push(result.sessionDir);
+        result.convertedFiles.forEach(f => {
+          allConvertedFiles.push({
+            ...f,
+            archiveName: `${result.baseName}/${f.name}`
+          });
+        });
+        results.push({
+          originalName: result.originalName,
+          fileCount: result.convertedFiles.length,
+          totalPages: result.totalPages,
+          success: true
+        });
+      } catch (err) {
+        console.error(`Error converting ${file.originalname}:`, err);
+        results.push({
+          originalName: file.originalname,
+          success: false,
+          error: err.message
+        });
+      } finally {
+        if (fs.existsSync(file.path)) {
+          fs.removeSync(file.path);
+        }
+      }
     }
 
-    if (pagesToConvert.length === 0) {
-      fs.removeSync(req.file.path);
-      return res.status(400).json({ error: 'No pages to convert' });
+    const successResults = results.filter(r => r.success);
+    if (successResults.length === 0) {
+      tempDirs.forEach(dir => fs.removeSync(dir));
+      return res.status(500).json({ error: 'Failed to convert any PDF files' });
     }
 
-    const sessionId = uuidv4();
-    const sessionDir = path.join(outputDir, sessionId);
-    fs.ensureDirSync(sessionDir);
+    const isSinglePDFSingleImage = successResults.length === 1 && successResults[0].fileCount === 1;
 
-    const convertedFiles = [];
-    const scale = Math.min(Math.max(dpi / 72, 1), 3);
+    if (isSinglePDFSingleImage) {
+      const singleFile = allConvertedFiles[0];
+      const destFileName = `pdf_to_image_${uuidv4()}.${format.toLowerCase()}`;
+      const destPath = path.join(outputDir, destFileName);
+      fs.moveSync(singleFile.path, destPath, { overwrite: true });
+      tempDirs.forEach(dir => fs.removeSync(dir));
 
-    for (const pageIdx of pagesToConvert) {
-      const page = pdf.getPage(pageIdx);
-      const pageSize = page.getSize();
-      const width = Math.min(Math.round(pageSize.width * scale), 1200);
-      const height = Math.min(Math.round(pageSize.height * scale), 1600);
+      const fileSize = fs.statSync(destPath).size;
+      const historyRecord = addHistory({
+        type: 'toImage',
+        fileName: destFileName,
+        originalName: `image_from_${successResults[0].originalName}`,
+        fileSize,
+        filePath: `output/${destFileName}`,
+        downloadUrl: `/download/${destFileName}`,
+        fileCount: 1,
+        format
+      });
 
-      const outputFileName = `page_${pageIdx + 1}.${format.toLowerCase()}`;
-      const outputPath = path.join(sessionDir, outputFileName);
-
-      const imageBuffer = createImageBuffer(width, height, pageIdx + 1, format);
-      fs.writeFileSync(outputPath, imageBuffer);
-
-      convertedFiles.push({
-        name: outputFileName,
-        path: outputPath,
-        size: fs.statSync(outputPath).size,
-        url: `/download/${sessionId}/${outputFileName}`
+      return res.json({
+        success: true,
+        isBatch: false,
+        downloadUrl: `/download/${destFileName}`,
+        fileName: destFileName,
+        fileSize,
+        fileCount: 1,
+        format,
+        historyId: historyRecord.id,
+        results
       });
     }
 
-    if (convertedFiles.length === 0) {
-      fs.removeSync(req.file.path);
-      fs.removeSync(sessionDir);
-      return res.status(500).json({ error: 'Failed to convert any pages' });
-    }
-
-    const zipName = `pdf_to_images_${sessionId}.zip`;
+    const zipName = `pdf_to_images_${batchSessionId}.zip`;
     const zipPath = path.join(outputDir, zipName);
     const output = fs.createWriteStream(zipPath);
     const archive = archiver('zip', { zlib: { level: 9 } });
-    
+
     archive.pipe(output);
-    convertedFiles.forEach(file => {
-      archive.file(file.path, { name: file.name });
+    allConvertedFiles.forEach(file => {
+      archive.file(file.path, { name: file.archiveName });
     });
     await archive.finalize();
 
-    fs.removeSync(req.file.path);
-    convertedFiles.forEach(f => fs.removeSync(f.path));
-    fs.removeSync(sessionDir);
+    tempDirs.forEach(dir => fs.removeSync(dir));
 
     const fileSize = fs.statSync(zipPath).size;
+    let totalFileCount = 0;
+    successResults.forEach(r => {
+      totalFileCount += r.fileCount;
+    });
+
     const historyRecord = addHistory({
       type: 'toImage',
       fileName: zipName,
-      originalName: `images_from_${req.file.originalname}`,
-      fileSize: fileSize,
+      originalName: `images_from_${successResults.length}_pdfs.zip`,
+      fileSize,
       filePath: `output/${zipName}`,
       downloadUrl: `/download/${zipName}`,
-      fileCount: convertedFiles.length,
-      format: format
+      fileCount: totalFileCount,
+      format,
+      pdfCount: successResults.length
     });
 
     res.json({
       success: true,
+      isBatch: true,
       downloadUrl: `/download/${zipName}`,
       fileName: zipName,
-      fileSize: fileSize,
-      fileCount: convertedFiles.length,
-      format: format,
-      files: convertedFiles.map(f => ({ name: f.name, size: f.size })),
-      historyId: historyRecord.id
+      fileSize,
+      fileCount: totalFileCount,
+      pdfCount: successResults.length,
+      format,
+      historyId: historyRecord.id,
+      results
     });
   } catch (error) {
     console.error('ToImage error:', error);

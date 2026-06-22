@@ -31,7 +31,6 @@
         @dragleave="isDragging = false"
         @drop.prevent="handleDrop"
         @click="triggerFileInput"
-        v-if="!file"
       >
         <el-icon :size="48" color="#667eea"><UploadFilled /></el-icon>
         <p style="font-size: 18px; margin-top: 16px; color: #333;">
@@ -41,33 +40,41 @@
           ref="fileInput"
           type="file" 
           accept=".pdf"
+          multiple
           style="display: none;"
           @change="handleFileSelect"
         />
       </div>
 
-      <div v-if="file" class="file-item" style="margin-bottom: 24px;">
-        <div style="display: flex; align-items: center; gap: 12px;">
-          <PdfPreview 
-            :src="file" 
-            width="80px" 
-            height="100px" 
-            :scale="1"
-            @click="openPreviewModal(file, file.name)"
-          />
-          <div>
-            <span style="font-weight: 500; color: #333;">{{ file.name }}</span>
-            <div style="color: #999; font-size: 13px; margin-top: 4px;">
-              {{ formatFileSize(file.size) }}
+      <div v-if="files.length > 0" class="files-list" style="margin-bottom: 24px;">
+        <div 
+          v-for="(f, index) in files" 
+          :key="index" 
+          class="file-item" 
+          style="margin-bottom: 12px;"
+        >
+          <div style="display: flex; align-items: center; gap: 12px;">
+            <PdfPreview 
+              :src="f" 
+              width="80px" 
+              height="100px" 
+              :scale="1"
+              @click="openPreviewModal(f, f.name)"
+            />
+            <div>
+              <span style="font-weight: 500; color: #333;">{{ f.name }}</span>
+              <div style="color: #999; font-size: 13px; margin-top: 4px;">
+                {{ formatFileSize(f.size) }}
+              </div>
             </div>
           </div>
+          <el-button type="danger" text @click="removeFile(index)">
+            <el-icon><Delete /></el-icon>
+          </el-button>
         </div>
-        <el-button type="danger" text @click="removeFile">
-          <el-icon><Delete /></el-icon>
-        </el-button>
       </div>
 
-      <div v-if="file">
+      <div v-if="files.length > 0">
         <template v-if="activeTab === 'delete'">
           <div class="setting-row">
             <span class="setting-label">删除页码：</span>
@@ -81,7 +88,7 @@
           <div style="text-align: center; margin-top: 24px;">
             <button class="action-button" @click="handleDeletePages" :disabled="loading || !pagesToDelete.trim()">
               <el-icon style="margin-right: 8px;"><Delete /></el-icon>
-              删除选中页面
+              删除选中页面（{{ files.length }}个文件）
             </button>
           </div>
         </template>
@@ -113,7 +120,7 @@
           <div style="text-align: center; margin-top: 24px;">
             <button class="action-button" @click="handleRotatePages" :disabled="loading || !canRotate">
               <el-icon style="margin-right: 8px;"><RefreshRight /></el-icon>
-              旋转页面
+              旋转页面（{{ files.length }}个文件）
             </button>
           </div>
         </template>
@@ -131,7 +138,7 @@
           <div style="text-align: center; margin-top: 24px;">
             <button class="action-button" @click="handleExtractPages" :disabled="loading || !pagesToExtract.trim()">
               <el-icon style="margin-right: 8px;"><DocumentCopy /></el-icon>
-              提取选中页面
+              提取选中页面（{{ files.length }}个文件）
             </button>
           </div>
         </template>
@@ -149,13 +156,13 @@
           <div style="text-align: center; margin-top: 24px;">
             <button class="action-button" @click="handleReorderPages" :disabled="loading || !newOrder.trim()">
               <el-icon style="margin-right: 8px;"><Rank /></el-icon>
-              重新排序
+              重新排序（{{ files.length }}个文件）
             </button>
           </div>
         </template>
       </div>
 
-      <div v-if="file && !result" class="preview-section">
+      <div v-if="files.length > 0 && !result && !isBatch" class="preview-section">
         <h3 style="margin-bottom: 16px; color: #333;">
           <el-icon style="margin-right: 8px;"><View /></el-icon>
           原始PDF预览
@@ -185,54 +192,98 @@
           <el-icon style="margin-right: 8px;"><CircleCheckFilled /></el-icon>
           操作成功！
         </h3>
-        <p v-if="result.pagesDeleted" style="margin-bottom: 12px;">
-          已删除 <strong>{{ result.pagesDeleted }}</strong> 页，剩余 <strong>{{ result.pagesRemaining }}</strong> 页
-        </p>
-        <p v-if="result.rotation" style="margin-bottom: 12px;">
-          已旋转 <strong>{{ result.rotation }}°</strong>
-        </p>
-        <p v-if="result.pagesExtracted" style="margin-bottom: 12px;">
-          已提取 <strong>{{ result.pagesExtracted }}</strong> 页
-        </p>
-        <p style="margin-bottom: 16px;">
-          文件大小：{{ formatFileSize(result.fileSize) }}
-        </p>
 
-        <div class="preview-comparison">
-          <div class="preview-column">
-            <h4 style="margin-bottom: 12px; color: #999;">处理前</h4>
-            <div class="pdf-preview-container">
-              <canvas ref="beforeCompareCanvas" class="preview-canvas"></canvas>
+        <template v-if="isBatch">
+          <p style="margin-bottom: 16px;">
+            已处理 <strong>{{ result.fileCount }}</strong> 个文件，打包为ZIP下载
+          </p>
+          <div class="batch-results" style="margin-bottom: 16px;">
+            <div 
+              v-for="(item, index) in result.results" 
+              :key="index"
+              class="batch-result-item"
+            >
+              <div class="batch-item-header">
+                <el-icon :size="18" :color="item.success ? '#67c23a' : '#f56c6c'">
+                  <CircleCheckFilled v-if="item.success" />
+                  <CircleCloseFilled v-else />
+                </el-icon>
+                <span style="font-weight: 500; color: #333;">{{ item.originalName }}</span>
+              </div>
+              <div v-if="item.success" style="color: #666; font-size: 13px; margin-top: 6px; padding-left: 26px;">
+                <template v-if="activeTab === 'delete'">
+                  已删除 {{ item.resultInfo?.pagesDeleted || 0 }} 页，剩余 {{ item.resultInfo?.pagesRemaining || 0 }} 页
+                </template>
+                <template v-else-if="activeTab === 'rotate'">
+                  已旋转 {{ item.resultInfo?.rotation || rotation }}°
+                </template>
+                <template v-else-if="activeTab === 'extract'">
+                  已提取 {{ item.resultInfo?.pagesExtracted || 0 }} 页
+                </template>
+                <template v-else-if="activeTab === 'reorder'">
+                  已重新排序页面
+                </template>
+                <span style="margin-left: 12px; color: #999;">
+                  {{ formatFileSize(item.fileSize) }}
+                </span>
+              </div>
+              <div v-else style="color: #f56c6c; font-size: 13px; margin-top: 6px; padding-left: 26px;">
+                处理失败：{{ item.error }}
+              </div>
             </div>
           </div>
-          <div class="preview-column">
-            <h4 style="margin-bottom: 12px; color: #667eea;">处理后</h4>
-            <div class="pdf-preview-container">
-              <canvas ref="afterPreviewCanvas" class="preview-canvas"></canvas>
+        </template>
+
+        <template v-else>
+          <p v-if="result.pagesDeleted" style="margin-bottom: 12px;">
+            已删除 <strong>{{ result.pagesDeleted }}</strong> 页，剩余 <strong>{{ result.pagesRemaining }}</strong> 页
+          </p>
+          <p v-if="result.rotation" style="margin-bottom: 12px;">
+            已旋转 <strong>{{ result.rotation }}°</strong>
+          </p>
+          <p v-if="result.pagesExtracted" style="margin-bottom: 12px;">
+            已提取 <strong>{{ result.pagesExtracted }}</strong> 页
+          </p>
+          <p style="margin-bottom: 16px;">
+            文件大小：{{ formatFileSize(result.fileSize) }}
+          </p>
+
+          <div class="preview-comparison">
+            <div class="preview-column">
+              <h4 style="margin-bottom: 12px; color: #999;">处理前</h4>
+              <div class="pdf-preview-container">
+                <canvas ref="beforeCompareCanvas" class="preview-canvas"></canvas>
+              </div>
+            </div>
+            <div class="preview-column">
+              <h4 style="margin-bottom: 12px; color: #667eea;">处理后</h4>
+              <div class="pdf-preview-container">
+                <canvas ref="afterPreviewCanvas" class="preview-canvas"></canvas>
+              </div>
             </div>
           </div>
-        </div>
-        
-        <div v-if="totalPages > 1" class="page-navigation">
-          <el-button 
-            :disabled="comparePage === 1" 
-            @click="comparePage--; renderComparePages(comparePage)"
-          >
-            <el-icon><ArrowLeft /></el-icon> 上一页
-          </el-button>
-          <span style="margin: 0 16px;">第 {{ comparePage }} / {{ afterTotalPages > 0 ? afterTotalPages : totalPages }} 页</span>
-          <el-button 
-            :disabled="comparePage >= (afterTotalPages > 0 ? afterTotalPages : totalPages)" 
-            @click="comparePage++; renderComparePages(comparePage)"
-          >
-            下一页 <el-icon><ArrowRight /></el-icon>
-          </el-button>
-        </div>
+          
+          <div v-if="totalPages > 1" class="page-navigation">
+            <el-button 
+              :disabled="comparePage === 1" 
+              @click="comparePage--; renderComparePages(comparePage)"
+            >
+              <el-icon><ArrowLeft /></el-icon> 上一页
+            </el-button>
+            <span style="margin: 0 16px;">第 {{ comparePage }} / {{ afterTotalPages > 0 ? afterTotalPages : totalPages }} 页</span>
+            <el-button 
+              :disabled="comparePage >= (afterTotalPages > 0 ? afterTotalPages : totalPages)" 
+              @click="comparePage++; renderComparePages(comparePage)"
+            >
+              下一页 <el-icon><ArrowRight /></el-icon>
+            </el-button>
+          </div>
+        </template>
 
         <div style="text-align: center; margin-top: 24px;">
           <button class="action-button" @click="downloadResult">
             <el-icon style="margin-right: 8px;"><Download /></el-icon>
-            下载PDF
+            {{ isBatch ? '下载ZIP' : '下载PDF' }}
           </button>
         </div>
       </div>
@@ -262,6 +313,7 @@ import {
 import LoadingOverlay from '../components/LoadingOverlay.vue'
 import PdfPreview from '../components/PdfPreview.vue'
 import PdfPreviewModal from '../components/PdfPreviewModal.vue'
+import { CircleCheckFilled, CircleCloseFilled } from '@element-plus/icons-vue'
 import * as pdfjsLib from 'pdfjs-dist'
 import pdfjsWorkerUrl from 'pdfjs-dist/build/pdf.worker.min.mjs?url'
 import cMapUrl from 'pdfjs-dist/cmaps/UniGB-UTF8-H.bcmap?url'
@@ -270,7 +322,7 @@ pdfjsLib.GlobalWorkerOptions.workerSrc = pdfjsWorkerUrl
 const cMapBaseUrl = cMapUrl.substring(0, cMapUrl.lastIndexOf('/') + 1)
 
 const fileInput = ref(null)
-const file = ref(null)
+const files = ref([])
 const isDragging = ref(false)
 const loading = ref(false)
 const result = ref(null)
@@ -297,6 +349,8 @@ const previewModalVisible = ref(false)
 const previewModalSrc = ref(null)
 const previewModalTitle = ref('PDF预览')
 
+const isBatch = computed(() => files.value.length > 1)
+
 const loadingText = computed(() => {
   switch (activeTab.value) {
     case 'delete': return '正在删除页面...'
@@ -321,25 +375,55 @@ const triggerFileInput = () => {
   fileInput.value.click()
 }
 
+const isFileDuplicate = (f) => {
+  return files.value.some(existing => 
+    existing.name === f.name && 
+    existing.size === f.size && 
+    existing.lastModified === f.lastModified
+  )
+}
+
+const addFiles = (newFiles) => {
+  let addedCount = 0
+  for (let i = 0; i < newFiles.length; i++) {
+    const f = newFiles[i]
+    if (f.type === 'application/pdf' && !isFileDuplicate(f)) {
+      files.value.push(f)
+      addedCount++
+    }
+  }
+  return addedCount
+}
+
 const handleFileSelect = async (e) => {
-  const selectedFile = e.target.files[0]
-  if (selectedFile && selectedFile.type === 'application/pdf') {
-    file.value = selectedFile
+  const selectedFiles = Array.from(e.target.files)
+  const addedCount = addFiles(selectedFiles)
+  
+  if (addedCount > 0) {
     result.value = null
-    await loadPdfForPreview(selectedFile)
+    if (!isBatch.value) {
+      await loadPdfForPreview(files.value[0])
+    }
   }
   e.target.value = ''
 }
 
 const handleDrop = async (e) => {
   isDragging.value = false
-  const droppedFile = e.dataTransfer.files[0]
-  if (droppedFile && droppedFile.type === 'application/pdf') {
-    file.value = droppedFile
-    result.value = null
-    await loadPdfForPreview(droppedFile)
-  } else {
+  const droppedFiles = Array.from(e.dataTransfer.files)
+  const pdfFiles = droppedFiles.filter(f => f.type === 'application/pdf')
+  
+  if (pdfFiles.length === 0) {
     ElMessage.warning('请拖入PDF文件')
+    return
+  }
+  
+  const addedCount = addFiles(pdfFiles)
+  if (addedCount > 0) {
+    result.value = null
+    if (!isBatch.value) {
+      await loadPdfForPreview(files.value[0])
+    }
   }
 }
 
@@ -452,13 +536,17 @@ const renderComparePages = async (pageNum) => {
   await renderPreviewPage('after', pageNum)
 }
 
-const removeFile = () => {
-  file.value = null
+const removeFile = (index) => {
+  files.value.splice(index, 1)
   result.value = null
   pdfDoc.value = null
   afterPdfDoc.value = null
   totalPages.value = 0
   afterTotalPages.value = 0
+  
+  if (files.value.length === 1) {
+    loadPdfForPreview(files.value[0])
+  }
 }
 
 const handleDeletePages = async () => {
@@ -471,10 +559,12 @@ const handleDeletePages = async () => {
   result.value = null
 
   try {
-    const response = await deletePages(file.value, pagesToDelete.value)
+    const response = await deletePages(files.value, pagesToDelete.value)
     result.value = response.data
     ElMessage.success('页面删除成功！')
-    await loadAfterPdfForPreview(response.data.downloadUrl)
+    if (!isBatch.value) {
+      await loadAfterPdfForPreview(response.data.downloadUrl)
+    }
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '删除失败，请重试')
   } finally {
@@ -493,10 +583,12 @@ const handleRotatePages = async () => {
 
   try {
     const pages = rotatePageMode.value === 'all' ? 'all' : pagesToRotate.value
-    const response = await rotatePages(file.value, pages, rotation.value)
+    const response = await rotatePages(files.value, pages, rotation.value)
     result.value = response.data
     ElMessage.success('页面旋转成功！')
-    await loadAfterPdfForPreview(response.data.downloadUrl)
+    if (!isBatch.value) {
+      await loadAfterPdfForPreview(response.data.downloadUrl)
+    }
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '旋转失败，请重试')
   } finally {
@@ -514,10 +606,12 @@ const handleExtractPages = async () => {
   result.value = null
 
   try {
-    const response = await extractPages(file.value, pagesToExtract.value)
+    const response = await extractPages(files.value, pagesToExtract.value)
     result.value = response.data
     ElMessage.success('页面提取成功！')
-    await loadAfterPdfForPreview(response.data.downloadUrl)
+    if (!isBatch.value) {
+      await loadAfterPdfForPreview(response.data.downloadUrl)
+    }
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '提取失败，请重试')
   } finally {
@@ -536,10 +630,12 @@ const handleReorderPages = async () => {
 
   try {
     const orderArr = newOrder.value.split(',').map(p => parseInt(p.trim())).filter(p => !isNaN(p))
-    const response = await reorderPages(file.value, orderArr)
+    const response = await reorderPages(files.value, orderArr)
     result.value = response.data
     ElMessage.success('页面重排序成功！')
-    await loadAfterPdfForPreview(response.data.downloadUrl)
+    if (!isBatch.value) {
+      await loadAfterPdfForPreview(response.data.downloadUrl)
+    }
   } catch (error) {
     ElMessage.error(error.response?.data?.error || '重排序失败，请重试')
   } finally {
@@ -549,7 +645,8 @@ const handleReorderPages = async () => {
 
 const downloadResult = () => {
   if (result.value) {
-    downloadFile(result.value.downloadUrl, `pages_${activeTab.value}_${Date.now()}.pdf`)
+    const ext = isBatch.value ? 'zip' : 'pdf'
+    downloadFile(result.value.downloadUrl, `pages_${activeTab.value}_${Date.now()}.${ext}`)
   }
 }
 
@@ -565,6 +662,11 @@ const openPreviewModal = (src, title) => {
   margin-top: 32px;
   padding-top: 24px;
   border-top: 1px solid #eee;
+}
+
+.files-list {
+  display: flex;
+  flex-direction: column;
 }
 
 .pdf-preview-container {
@@ -606,6 +708,31 @@ const openPreviewModal = (src, title) => {
 .preview-column h4 {
   font-size: 14px;
   font-weight: 600;
+}
+
+.batch-results {
+  max-height: 400px;
+  overflow-y: auto;
+}
+
+.batch-result-item {
+  padding: 12px 16px;
+  background: #f8f9fa;
+  border-radius: 8px;
+  margin-bottom: 8px;
+  border: 1px solid #e9ecef;
+  transition: all 0.2s;
+}
+
+.batch-result-item:hover {
+  background: #f0f5ff;
+  border-color: #d6e4ff;
+}
+
+.batch-item-header {
+  display: flex;
+  align-items: center;
+  gap: 8px;
 }
 
 @media (max-width: 768px) {

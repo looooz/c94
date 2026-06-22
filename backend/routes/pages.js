@@ -3,28 +3,25 @@ const router = express.Router();
 const fs = require('fs-extra');
 const path = require('path');
 const { PDFDocument, degrees } = require('pdf-lib');
+const archiver = require('archiver');
 const { v4: uuidv4 } = require('uuid');
 const upload = require('../middleware/upload');
 const { addHistory } = require('../utils/history');
 
 const outputDir = path.join(__dirname, '../output');
 
-router.post('/delete', upload.single('pdf'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Please upload a PDF file' });
-    }
+const processSinglePDF = async (file, operation, options) => {
+  const pdfBytes = fs.readFileSync(file.path);
+  const pdf = await PDFDocument.load(pdfBytes);
+  const totalPages = pdf.getPageCount();
+  const baseName = path.basename(file.originalname, path.extname(file.originalname));
+  
+  let resultPdf = null;
+  let resultInfo = {};
 
-    const { pagesToDelete } = req.body;
-    if (!pagesToDelete) {
-      return res.status(400).json({ error: 'Please specify pages to delete' });
-    }
-
+  if (operation === 'delete') {
+    const { pagesToDelete } = options;
     const pagesToDeleteArr = pagesToDelete.split(',').map(p => parseInt(p.trim()) - 1);
-    const pdfBytes = fs.readFileSync(req.file.path);
-    const pdf = await PDFDocument.load(pdfBytes);
-    const totalPages = pdf.getPageCount();
-    
     const validPages = pagesToDeleteArr.filter(p => p >= 0 && p < totalPages);
     const pagesToKeep = [];
     
@@ -35,67 +32,22 @@ router.post('/delete', upload.single('pdf'), async (req, res) => {
     }
 
     if (pagesToKeep.length === 0) {
-      fs.removeSync(req.file.path);
-      return res.status(400).json({ error: 'Cannot delete all pages' });
+      throw new Error('Cannot delete all pages');
     }
 
-    const newPdf = await PDFDocument.create();
-    const copiedPages = await newPdf.copyPages(pdf, pagesToKeep);
-    copiedPages.forEach(page => newPdf.addPage(page));
-
-    const newPdfBytes = await newPdf.save();
-    const outputFileName = `pages_deleted_${uuidv4()}.pdf`;
-    const outputPath = path.join(outputDir, outputFileName);
-    fs.writeFileSync(outputPath, newPdfBytes);
-
-    fs.removeSync(req.file.path);
-
-    const fileSize = fs.statSync(outputPath).size;
-    const historyRecord = addHistory({
-      type: 'pages-delete',
-      fileName: outputFileName,
-      originalName: `deleted_pages_${req.file.originalname}`,
-      fileSize: fileSize,
-      filePath: `output/${outputFileName}`,
-      downloadUrl: `/download/${outputFileName}`,
+    resultPdf = await PDFDocument.create();
+    const copiedPages = await resultPdf.copyPages(pdf, pagesToKeep);
+    copiedPages.forEach(page => resultPdf.addPage(page));
+    resultInfo = {
       pagesDeleted: validPages.length,
       pagesRemaining: pagesToKeep.length
-    });
-
-    res.json({
-      success: true,
-      downloadUrl: `/download/${outputFileName}`,
-      fileName: outputFileName,
-      fileSize: fileSize,
-      pagesDeleted: validPages.length,
-      pagesRemaining: pagesToKeep.length,
-      historyId: historyRecord.id
-    });
-  } catch (error) {
-    console.error('Delete pages error:', error);
-    res.status(500).json({ error: 'Failed to delete pages: ' + error.message });
-  }
-});
-
-router.post('/rotate', upload.single('pdf'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Please upload a PDF file' });
-    }
-
-    const { pagesToRotate, rotation } = req.body;
-    if (!pagesToRotate || !rotation) {
-      return res.status(400).json({ error: 'Please specify pages and rotation' });
-    }
-
+    };
+  } else if (operation === 'rotate') {
+    const { pagesToRotate, rotation } = options;
     const pagesToRotateArr = pagesToRotate === 'all' ? 'all' : 
       pagesToRotate.split(',').map(p => parseInt(p.trim()) - 1);
     const rotationNum = parseInt(rotation);
-
-    const pdfBytes = fs.readFileSync(req.file.path);
-    const pdf = await PDFDocument.load(pdfBytes);
     const pages = pdf.getPages();
-    const totalPages = pages.length;
 
     pages.forEach((page, idx) => {
       const shouldRotate = pagesToRotateArr === 'all' || pagesToRotateArr.includes(idx);
@@ -105,152 +57,192 @@ router.post('/rotate', upload.single('pdf'), async (req, res) => {
       }
     });
 
-    const rotatedBytes = await pdf.save();
-    const outputFileName = `rotated_${uuidv4()}.pdf`;
-    const outputPath = path.join(outputDir, outputFileName);
-    fs.writeFileSync(outputPath, rotatedBytes);
-
-    fs.removeSync(req.file.path);
-
-    const fileSize = fs.statSync(outputPath).size;
-    const historyRecord = addHistory({
-      type: 'pages-rotate',
-      fileName: outputFileName,
-      originalName: `rotated_${req.file.originalname}`,
-      fileSize: fileSize,
-      filePath: `output/${outputFileName}`,
-      downloadUrl: `/download/${outputFileName}`,
-      rotation: rotationNum
-    });
-
-    res.json({
-      success: true,
-      downloadUrl: `/download/${outputFileName}`,
-      fileName: outputFileName,
-      fileSize: fileSize,
-      rotation: rotationNum,
-      historyId: historyRecord.id
-    });
-  } catch (error) {
-    console.error('Rotate pages error:', error);
-    res.status(500).json({ error: 'Failed to rotate pages: ' + error.message });
-  }
-});
-
-router.post('/extract', upload.single('pdf'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Please upload a PDF file' });
-    }
-
-    const { pagesToExtract } = req.body;
-    if (!pagesToExtract) {
-      return res.status(400).json({ error: 'Please specify pages to extract' });
-    }
-
+    resultPdf = pdf;
+    resultInfo = { rotation: rotationNum };
+  } else if (operation === 'extract') {
+    const { pagesToExtract } = options;
     const pagesToExtractArr = pagesToExtract.split(',').map(p => parseInt(p.trim()) - 1);
-    const pdfBytes = fs.readFileSync(req.file.path);
-    const pdf = await PDFDocument.load(pdfBytes);
-    const totalPages = pdf.getPageCount();
-    
     const validPages = pagesToExtractArr.filter(p => p >= 0 && p < totalPages);
     
     if (validPages.length === 0) {
-      fs.removeSync(req.file.path);
-      return res.status(400).json({ error: 'No valid pages to extract' });
+      throw new Error('No valid pages to extract');
     }
 
-    const newPdf = await PDFDocument.create();
-    const copiedPages = await newPdf.copyPages(pdf, validPages);
-    copiedPages.forEach(page => newPdf.addPage(page));
-
-    const newPdfBytes = await newPdf.save();
-    const outputFileName = `extracted_${uuidv4()}.pdf`;
-    const outputPath = path.join(outputDir, outputFileName);
-    fs.writeFileSync(outputPath, newPdfBytes);
-
-    fs.removeSync(req.file.path);
-
-    const fileSize = fs.statSync(outputPath).size;
-    const historyRecord = addHistory({
-      type: 'pages-extract',
-      fileName: outputFileName,
-      originalName: `extracted_${req.file.originalname}`,
-      fileSize: fileSize,
-      filePath: `output/${outputFileName}`,
-      downloadUrl: `/download/${outputFileName}`,
-      pagesExtracted: validPages.length
-    });
-
-    res.json({
-      success: true,
-      downloadUrl: `/download/${outputFileName}`,
-      fileName: outputFileName,
-      fileSize: fileSize,
-      pagesExtracted: validPages.length,
-      historyId: historyRecord.id
-    });
-  } catch (error) {
-    console.error('Extract pages error:', error);
-    res.status(500).json({ error: 'Failed to extract pages: ' + error.message });
-  }
-});
-
-router.post('/reorder', upload.single('pdf'), async (req, res) => {
-  try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'Please upload a PDF file' });
-    }
-
-    const { newOrder } = req.body;
-    if (!newOrder) {
-      return res.status(400).json({ error: 'Please specify new page order' });
-    }
-
+    resultPdf = await PDFDocument.create();
+    const copiedPages = await resultPdf.copyPages(pdf, validPages);
+    copiedPages.forEach(page => resultPdf.addPage(page));
+    resultInfo = { pagesExtracted: validPages.length };
+  } else if (operation === 'reorder') {
+    const { newOrder } = options;
     const newOrderArr = JSON.parse(newOrder).map(p => parseInt(p) - 1);
-    const pdfBytes = fs.readFileSync(req.file.path);
-    const pdf = await PDFDocument.load(pdfBytes);
-    const totalPages = pdf.getPageCount();
-    
     const validOrder = newOrderArr.filter(p => p >= 0 && p < totalPages);
     
     if (validOrder.length !== totalPages) {
-      fs.removeSync(req.file.path);
-      return res.status(400).json({ error: 'Invalid page order' });
+      throw new Error('Invalid page order');
     }
 
-    const newPdf = await PDFDocument.create();
-    const copiedPages = await newPdf.copyPages(pdf, validOrder);
-    copiedPages.forEach(page => newPdf.addPage(page));
+    resultPdf = await PDFDocument.create();
+    const copiedPages = await resultPdf.copyPages(pdf, validOrder);
+    copiedPages.forEach(page => resultPdf.addPage(page));
+    resultInfo = {};
+  }
 
-    const newPdfBytes = await newPdf.save();
-    const outputFileName = `reordered_${uuidv4()}.pdf`;
-    const outputPath = path.join(outputDir, outputFileName);
-    fs.writeFileSync(outputPath, newPdfBytes);
+  const resultBytes = await resultPdf.save();
+  const outputFileName = `${operation}_${baseName}_${uuidv4().slice(0, 8)}.pdf`;
 
-    fs.removeSync(req.file.path);
+  return {
+    originalName: file.originalname,
+    outputFileName,
+    resultBytes,
+    resultInfo,
+    totalPages
+  };
+};
 
-    const fileSize = fs.statSync(outputPath).size;
+const handleBatchOperation = async (req, res, operation, optionFields) => {
+  try {
+    if (!req.files || req.files.length === 0) {
+      return res.status(400).json({ error: 'Please upload at least one PDF file' });
+    }
+
+    const files = req.files;
+    const options = {};
+    optionFields.forEach(field => {
+      if (req.body[field] !== undefined) {
+        options[field] = req.body[field];
+      }
+    });
+
+    const sessionId = uuidv4();
+    const sessionDir = path.join(outputDir, sessionId);
+    fs.ensureDirSync(sessionDir);
+
+    const results = [];
+
+    for (let i = 0; i < files.length; i++) {
+      const file = files[i];
+      try {
+        const result = await processSinglePDF(file, operation, options);
+        const outputPath = path.join(sessionDir, result.outputFileName);
+        fs.writeFileSync(outputPath, result.resultBytes);
+        const fileSize = fs.statSync(outputPath).size;
+        results.push({
+          originalName: result.originalName,
+          outputFileName: result.outputFileName,
+          fileSize,
+          resultInfo: result.resultInfo,
+          totalPages: result.totalPages,
+          success: true
+        });
+      } catch (err) {
+        console.error(`Error processing ${file.originalname}:`, err);
+        results.push({
+          originalName: file.originalname,
+          success: false,
+          error: err.message
+        });
+      } finally {
+        if (fs.existsSync(file.path)) {
+          fs.removeSync(file.path);
+        }
+      }
+    }
+
+    const successResults = results.filter(r => r.success);
+    if (successResults.length === 0) {
+      fs.removeSync(sessionDir);
+      return res.status(500).json({ error: `Failed to ${operation} any PDF files` });
+    }
+
+    if (successResults.length === 1) {
+      const singleResult = successResults[0];
+      const srcPath = path.join(sessionDir, singleResult.outputFileName);
+      const destPath = path.join(outputDir, singleResult.outputFileName);
+      fs.moveSync(srcPath, destPath, { overwrite: true });
+      fs.removeSync(sessionDir);
+
+      const historyRecord = addHistory({
+        type: `pages-${operation}`,
+        fileName: singleResult.outputFileName,
+        originalName: `${operation}_${singleResult.originalName}`,
+        fileSize: singleResult.fileSize,
+        filePath: `output/${singleResult.outputFileName}`,
+        downloadUrl: `/download/${singleResult.outputFileName}`,
+        ...singleResult.resultInfo
+      });
+
+      return res.json({
+        success: true,
+        isBatch: false,
+        downloadUrl: `/download/${singleResult.outputFileName}`,
+        fileName: singleResult.outputFileName,
+        fileSize: singleResult.fileSize,
+        ...singleResult.resultInfo,
+        historyId: historyRecord.id,
+        results
+      });
+    }
+
+    const zipName = `pages_${operation}_batch_${sessionId}.zip`;
+    const zipPath = path.join(outputDir, zipName);
+    const output = fs.createWriteStream(zipPath);
+    const archive = archiver('zip', { zlib: { level: 9 } });
+
+    archive.pipe(output);
+    successResults.forEach(r => {
+      const filePath = path.join(sessionDir, r.outputFileName);
+      archive.file(filePath, { name: r.outputFileName });
+    });
+    await archive.finalize();
+
+    fs.removeSync(sessionDir);
+
+    const fileSize = fs.statSync(zipPath).size;
+    let totalFileSize = 0;
+    successResults.forEach(r => {
+      totalFileSize += r.fileSize;
+    });
+
     const historyRecord = addHistory({
-      type: 'pages-reorder',
-      fileName: outputFileName,
-      originalName: `reordered_${req.file.originalname}`,
-      fileSize: fileSize,
-      filePath: `output/${outputFileName}`,
-      downloadUrl: `/download/${outputFileName}`
+      type: `pages-${operation}`,
+      fileName: zipName,
+      originalName: `pages_${operation}_batch_${successResults.length}_files.zip`,
+      fileSize,
+      filePath: `output/${zipName}`,
+      downloadUrl: `/download/${zipName}`,
+      fileCount: successResults.length
     });
 
     res.json({
       success: true,
-      downloadUrl: `/download/${outputFileName}`,
-      fileName: outputFileName,
-      fileSize: fileSize,
-      historyId: historyRecord.id
+      isBatch: true,
+      downloadUrl: `/download/${zipName}`,
+      fileName: zipName,
+      fileSize,
+      fileCount: successResults.length,
+      historyId: historyRecord.id,
+      results
     });
   } catch (error) {
-    console.error('Reorder pages error:', error);
-    res.status(500).json({ error: 'Failed to reorder pages: ' + error.message });
+    console.error(`Pages ${operation} error:`, error);
+    res.status(500).json({ error: `Failed to ${operation} pages: ` + error.message });
   }
+};
+
+router.post('/delete', upload.array('pdfs', 20), async (req, res) => {
+  await handleBatchOperation(req, res, 'delete', ['pagesToDelete']);
+});
+
+router.post('/rotate', upload.array('pdfs', 20), async (req, res) => {
+  await handleBatchOperation(req, res, 'rotate', ['pagesToRotate', 'rotation']);
+});
+
+router.post('/extract', upload.array('pdfs', 20), async (req, res) => {
+  await handleBatchOperation(req, res, 'extract', ['pagesToExtract']);
+});
+
+router.post('/reorder', upload.array('pdfs', 20), async (req, res) => {
+  await handleBatchOperation(req, res, 'reorder', ['newOrder']);
 });
 
 module.exports = router;
